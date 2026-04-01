@@ -46,9 +46,8 @@ type BoardState = Record<string, string[]>
 type ProviderSelection = { rankers: RankerProvider[]; sources: SourceProvider[] }
 type TierThemeId = 'custom' | 'forge' | 'aurora' | 'inferno' | 'toxic'
 type SavedState = { board: BoardState; compactMode: boolean; itemsById: Record<string, TierItem>; listContext: string; providerSelection: ProviderSelection; sidebarCollapsed: boolean; tierThemeId: TierThemeId; title: string; tiers: TierConfig[] }
-type HealthResponse = { integrations?: { discord: { configured: boolean } }; mode: string; ok: boolean; providers?: { gemini: { configured: boolean; model: string }; google: { configured: boolean }; groq: { configured: boolean; model: string }; local: { configured: boolean; model: string } }; ranker?: { available?: boolean; error: string | null; model: string; ready: boolean; state: string } }
+type HealthResponse = { mode: string; ok: boolean; providers?: { gemini: { configured: boolean; model: string }; google: { configured: boolean }; groq: { configured: boolean; model: string }; local: { configured: boolean; model: string } }; ranker?: { available?: boolean; error: string | null; model: string; ready: boolean; state: string } }
 type LookupResponse = { candidates?: ImageResult[]; query: string; result: ImageResult }
-type DiscordShareResponse = { channelId: string; messageId: string; ok: boolean }
 type SuggestItemsResponse = { items: Array<{ context: string; name: string }>; title: string }
 type Notice = { message: string; tone: NoticeTone }
 type PickerState = { candidates: ImageResult[]; error: string; itemId: string | null; loading: boolean; query: string; recommendedId: string | null }
@@ -147,7 +146,6 @@ function App() {
     tone: 'info',
   })
   const [backendReady, setBackendReady] = useState<boolean | null>(null)
-  const [discordConfigured, setDiscordConfigured] = useState(false)
   const [lookupMode, setLookupMode] = useState('Local CLIP')
   const [providerAvailability, setProviderAvailability] = useState({ gemini: false, google: false, groq: false, local: true })
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -155,7 +153,6 @@ function App() {
   const [tierDropTargetId, setTierDropTargetId] = useState<string | null>(null)
   const [autoPickingItems, setAutoPickingItems] = useState(false)
   const [bulkRunning, setBulkRunning] = useState(false)
-  const [sharingToDiscord, setSharingToDiscord] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [providerMenuOpen, setProviderMenuOpen] = useState(false)
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
@@ -212,7 +209,6 @@ function App() {
         const payload = (await response.json()) as HealthResponse
         if (!cancelled) {
           setBackendReady(payload.ok)
-          setDiscordConfigured(Boolean(payload.integrations?.discord?.configured))
           setLookupMode(payload.mode)
           setProviderAvailability({
             gemini: Boolean(payload.providers?.gemini?.configured),
@@ -246,7 +242,6 @@ function App() {
       } catch {
         if (!cancelled) {
           setBackendReady(false)
-          setDiscordConfigured(false)
           setLookupMode('Offline')
         }
       }
@@ -973,58 +968,6 @@ function App() {
     }
   }
 
-  async function shareBoardToDiscord() {
-    if (backendReady === false) {
-      setNotice({
-        message: 'Discord sharing needs the backend online.',
-        tone: 'warning',
-      })
-      return
-    }
-
-    if (!discordConfigured) {
-      setNotice({
-        message: 'Discord bot sharing is not configured yet. Add `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID` on the server.',
-        tone: 'warning',
-      })
-      return
-    }
-
-    setSharingToDiscord(true)
-
-    try {
-      const imageDataUrl = await captureBoardImage()
-      const response = await fetch('/api/discord/share', {
-        body: JSON.stringify({
-          imageDataUrl,
-          listContext,
-          title,
-        }),
-        headers: { 'Content-Type': 'application/json' },
-        method: 'POST',
-      })
-      const payload = (await response.json()) as DiscordShareResponse | { error?: string }
-      const errorMessage = 'error' in payload ? payload.error : undefined
-
-      if (!response.ok || !('ok' in payload)) {
-        throw new Error(errorMessage || 'Unable to share this tier list to Discord.')
-      }
-
-      setNotice({
-        message: `Shared "${title || 'Untitled tier list'}" to Discord.`,
-        tone: 'success',
-      })
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Unable to share this tier list to Discord.'
-      setNotice({ message, tone: 'error' })
-    } finally {
-      setSharingToDiscord(false)
-    }
-  }
-
   function clearPlacements() {
     const allIds = Object.keys(itemsRef.current)
     const nextBoard = { ...createBoard(tiers), [POOL_ID]: allIds }
@@ -1332,7 +1275,7 @@ function App() {
                   <div className="button-row"><button className="accent-button" disabled={bulkRunning || autoPickingItems || !Object.keys(itemsById).length} onClick={() => { void lookupAllImages() }} type="button">{bulkRunning || autoPickingItems ? 'Matching images...' : 'Find images for all'}</button></div>
                 </Panel>
                 <div className={`notice notice-${notice.tone}`}><strong>{backendReady === false ? 'Backend offline.' : 'Status.'}</strong><span>{notice.message}</span></div>
-                <div className="meta-card"><p>Current image APIs: {selectionSummary(providerSelection)}.</p><p>Choose sources and AI rerankers from the `Image APIs` dropdown. With no AI rankers selected, the app falls back to metadata-only matching.</p><p>Discord share: {discordConfigured ? 'enabled for the current board.' : 'disabled until the bot token and channel ID are added on the server.'}</p></div>
+                <div className="meta-card"><p>Current image APIs: {selectionSummary(providerSelection)}.</p><p>Choose sources and AI rerankers from the `Image APIs` dropdown. With no AI rankers selected, the app falls back to metadata-only matching.</p></div>
               </div>
             </div>
           )}
@@ -1416,7 +1359,6 @@ function App() {
               <button className="ghost-button" onClick={downloadListFile} type="button">Save list</button>
               <button className="ghost-button" onClick={openImportDialog} type="button">Import list</button>
               <button className={`ghost-button ${compactMode ? 'ghost-button-active' : ''}`} onClick={() => setCompactMode((current) => !current)} type="button">{compactMode ? 'Standard cards' : 'Compact mode'}</button>
-              <button className="ghost-button" disabled={sharingToDiscord} onClick={() => void shareBoardToDiscord()} type="button">{sharingToDiscord ? 'Sharing...' : 'Share to Discord'}</button>
               <button className="accent-button" onClick={() => void exportBoard()} type="button">Export PNG</button>
             </div>
           </div>

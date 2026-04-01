@@ -20,8 +20,6 @@ const GOOGLE_API_KEY = ensureString(process.env.GOOGLE_API_KEY)
 const GOOGLE_CSE_ID = ensureString(process.env.GOOGLE_CSE_ID)
 const GOOGLE_GL = ensureString(process.env.GOOGLE_GL)
 const GOOGLE_HL = ensureString(process.env.GOOGLE_HL)
-const DISCORD_BOT_TOKEN = ensureString(process.env.DISCORD_BOT_TOKEN)
-const DISCORD_CHANNEL_ID = ensureString(process.env.DISCORD_CHANNEL_ID)
 const SOURCE_PROVIDER_KEYS = ['commons', 'wikipedia', 'openverse', 'google']
 const RANKER_PROVIDER_KEYS = ['local', 'gemini', 'groq']
 
@@ -31,7 +29,7 @@ const distPath = path.resolve(__dirname, '..', 'dist')
 
 const app = express()
 
-app.use(express.json({ limit: '12mb' }))
+app.use(express.json({ limit: '1mb' }))
 
 app.get('/api/health', (_request, response) => {
   const rankerStatus = LocalImageRanker.getStatus()
@@ -48,11 +46,6 @@ app.get('/api/health', (_request, response) => {
       local: {
         configured: rankerStatus.available,
         model: rankerStatus.model,
-      },
-    },
-    integrations: {
-      discord: {
-        configured: Boolean(DISCORD_BOT_TOKEN && DISCORD_CHANNEL_ID),
       },
     },
     ranker: rankerStatus,
@@ -177,44 +170,6 @@ app.post('/api/images/lookup', async (request, response) => {
   }
 })
 
-app.post('/api/discord/share', async (request, response) => {
-  if (!DISCORD_BOT_TOKEN || !DISCORD_CHANNEL_ID) {
-    response.status(503).json({
-      error:
-        'Discord bot sharing is not configured. Add DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID on the server.',
-    })
-    return
-  }
-
-  const title = ensureString(request.body?.title) || 'Untitled tier list'
-  const listContext = ensureString(request.body?.listContext)
-  const imageDataUrl = ensureString(request.body?.imageDataUrl)
-
-  if (!imageDataUrl) {
-    response.status(400).json({ error: 'imageDataUrl is required.' })
-    return
-  }
-
-  try {
-    const attachment = parseImageDataUrl(
-      imageDataUrl,
-      `${slugifyFilename(title || 'tier-list')}.png`,
-    )
-    const result = await sendTierListToDiscord({
-      attachment,
-      listContext,
-      title,
-    })
-
-    response.json(result)
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : 'Discord share failed.'
-
-    response.status(500).json({ error: message })
-  }
-})
-
 app.use(express.static(distPath))
 
 app.use((request, response, next) => {
@@ -259,100 +214,6 @@ function describeMode(rankerStatus, hostedStatus) {
 
 function ensureString(value) {
   return typeof value === 'string' ? value.trim() : ''
-}
-
-function slugifyFilename(value) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64) || 'tier-list'
-}
-
-function parseImageDataUrl(value, filename) {
-  const match = value.match(/^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i)
-
-  if (!match) {
-    throw new Error('The exported board image was not in a supported format.')
-  }
-
-  const [, contentType, base64Payload] = match
-  const bytes = Buffer.from(base64Payload, 'base64')
-
-  if (!bytes.length) {
-    throw new Error('The exported board image was empty.')
-  }
-
-  return {
-    bytes,
-    contentType,
-    filename,
-  }
-}
-
-function buildDiscordMessageContent(title, listContext) {
-  const lines = [`Tier list: ${title}`]
-  const summary = summarizeContext(listContext)
-
-  if (summary) {
-    lines.push(`Context: ${summary}`)
-  }
-
-  lines.push('Shared from Forge Tierlist.')
-
-  return lines.join('\n').slice(0, 1800)
-}
-
-async function sendTierListToDiscord({ attachment, listContext, title }) {
-  const form = new FormData()
-  form.append(
-    'payload_json',
-    JSON.stringify({
-      allowed_mentions: { parse: [] },
-      content: buildDiscordMessageContent(title, listContext),
-    }),
-  )
-  form.append(
-    'files[0]',
-    new Blob([attachment.bytes], { type: attachment.contentType }),
-    attachment.filename,
-  )
-
-  const result = await fetch(
-    `https://discord.com/api/v10/channels/${DISCORD_CHANNEL_ID}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
-        'User-Agent': USER_AGENT,
-      },
-      body: form,
-      signal: AbortSignal.timeout(20_000),
-    },
-  )
-
-  if (!result.ok) {
-    throw new Error(await readDiscordError(result))
-  }
-
-  const payload = await result.json()
-
-  return {
-    channelId: payload.channel_id,
-    messageId: payload.id,
-    ok: true,
-  }
-}
-
-async function readDiscordError(result) {
-  try {
-    const payload = await result.json()
-    if (typeof payload?.message === 'string' && payload.message) {
-      return `Discord share failed: ${payload.message}`
-    }
-  } catch {}
-
-  return `Discord share failed with status ${result.status}.`
 }
 
 function buildSearchQuery(itemName, itemContext, listContext) {
