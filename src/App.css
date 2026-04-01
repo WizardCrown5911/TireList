@@ -256,6 +256,24 @@
   line-height: 1.5;
 }
 
+.finder-manual {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.finder-manual-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.finder-divider {
+  height: 1px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 53, 94, 0.3), rgba(80, 146, 255, 0.26));
+}
+
 .finder-toolbar {
   display: flex;
   flex-direction: column;

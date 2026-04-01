@@ -51,6 +51,7 @@ type SuggestItemsResponse = { items: Array<{ context: string; name: string }>; t
 type Notice = { message: string; tone: NoticeTone }
 type PickerState = { candidates: ImageResult[]; error: string; itemId: string | null; loading: boolean; query: string; recommendedId: string | null }
 type SuggestedItem = { context: string; id: string; name: string }
+type CountLabel = { plural: string; singular: string }
 type LaneProps = {
   color: string
   emptyMessage: string
@@ -109,8 +110,9 @@ function App() {
   const [selectedSuggestionIds, setSelectedSuggestionIds] = useState<string[]>([])
   const [findingSuggestions, setFindingSuggestions] = useState(false)
   const [suggestionError, setSuggestionError] = useState('')
+  const [manualItemsInput, setManualItemsInput] = useState('')
   const [notice, setNotice] = useState<Notice>({
-    message: 'Set a list title, generate related items, then add selected ones to the pool and let the matcher pick images.',
+    message: 'Set a list title, generate related items, or add your own items to the pool and let the matcher pick images.',
     tone: 'info',
   })
   const [backendReady, setBackendReady] = useState<boolean | null>(null)
@@ -325,6 +327,7 @@ function App() {
       setTitleSuggestions([])
       setSelectedSuggestionIds([])
       setSuggestionError('')
+      setManualItemsInput('')
       closeImagePicker()
       setNotice({
         message: `Imported "${nextState.title}" with ${Object.keys(nextState.itemsById).length} items.`,
@@ -411,7 +414,7 @@ function App() {
     setSelectedSuggestionIds([])
   }
 
-  function addEntriesToPool(entries: Array<{ context: string; name: string }>, sourceLabel: string) {
+  function addEntriesToPool(entries: Array<{ context: string; name: string }>, sourceLabel: CountLabel) {
     const seen = new Set(Object.values(itemsRef.current).map((item) => itemKeyFor(item.name, item.context)))
     const uniqueEntries = entries.filter((entry) => {
       const name = entry.name.trim()
@@ -428,7 +431,7 @@ function App() {
 
     if (!uniqueEntries.length) {
       setNotice({
-        message: 'Those suggested items are already on the board.',
+        message: 'Those items are already on the board.',
         tone: 'warning',
       })
       return
@@ -450,14 +453,14 @@ function App() {
 
     if (backendReady === false) {
       setNotice({
-        message: `Added ${nextIds.length} ${sourceLabel} to the pool. The backend is offline, so images were not auto-picked.`,
+        message: `Added ${nextIds.length} ${formatCountLabel(nextIds.length, sourceLabel)} to the pool. The backend is offline, so images were not auto-picked.`,
         tone: 'warning',
       })
       return
     }
 
     setNotice({
-      message: `Added ${nextIds.length} ${sourceLabel} to the pool. Auto-picking images now...`,
+      message: `Added ${nextIds.length} ${formatCountLabel(nextIds.length, sourceLabel)} to the pool. Auto-picking images now...`,
       tone: 'info',
     })
     void autoLookupNewItems(nextIds)
@@ -478,8 +481,23 @@ function App() {
       return
     }
 
-    addEntriesToPool(entries, mode === 'all' ? 'suggested items' : 'selected items')
+    addEntriesToPool(entries, mode === 'all' ? { plural: 'suggested items', singular: 'suggested item' } : { plural: 'selected items', singular: 'selected item' })
     setSelectedSuggestionIds((current) => current.filter((id) => !selectedIds.has(id)))
+  }
+
+  function addManualItems() {
+    const entries = parseManualEntries(manualItemsInput)
+
+    if (!entries.length) {
+      setNotice({
+        message: 'Type at least one item first. One per line works best, and simple lists can be comma-separated.',
+        tone: 'warning',
+      })
+      return
+    }
+
+    addEntriesToPool(entries, { plural: 'manual items', singular: 'manual item' })
+    setManualItemsInput('')
   }
 
   async function fetchLookupPayload(itemId: string) {
@@ -813,6 +831,7 @@ function App() {
     setTitleSuggestions([])
     setSelectedSuggestionIds([])
     setSuggestionError('')
+    setManualItemsInput('')
     pendingUploadItemIdRef.current = null
     closeImagePicker()
     storageWarningShownRef.current = false
@@ -941,6 +960,20 @@ function App() {
             <label className="field"><span>Context for image matching</span><textarea onChange={(event) => setListContext(event.target.value)} placeholder="Nintendo characters, pizza toppings, horror films, wrestling themes..." rows={4} value={listContext} /></label>
           </Panel>
           <Panel title="Item Finder" action={<button className="accent-button" disabled={findingSuggestions || !title.trim()} onClick={() => { void findRelatedItemsFromTitle() }} type="button">{findingSuggestions ? 'Finding items...' : 'Find from title'}</button>}>
+            <div className="finder-manual">
+              <label className="field">
+                <span>Add your own items</span>
+                <textarea onChange={(event) => setManualItemsInput(event.target.value)} placeholder={`Mario\nLuigi\nPrincess Peach | Mario series`} rows={5} value={manualItemsInput} />
+              </label>
+              <div className="finder-manual-toolbar">
+                <span className="finder-summary">One per line works best. Optional context: `Name | Context`, `Name - Context`, or `Name (Context)`.</span>
+                <div className="button-row">
+                  <button className="ghost-button" disabled={!manualItemsInput.trim()} onClick={() => setManualItemsInput('')} type="button">Clear text</button>
+                  <button className="accent-button" disabled={!manualItemsInput.trim()} onClick={addManualItems} type="button">Add typed items</button>
+                </div>
+              </div>
+            </div>
+            <div className="finder-divider" />
             <p className="finder-copy">Use the list title and optional context to generate related items, then add the selected ones or the whole batch to the pool.</p>
             {titleSuggestions.length ? (
               <>
@@ -1337,6 +1370,7 @@ function initialsFor(value: string) { return value.split(/\s+/).slice(0, 2).map(
 function slugify(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') }
 function hasSourceLink(image: ImageResult) { return Boolean(image.sourceUrl) && !image.sourceUrl.startsWith('data:') }
 function itemKeyFor(name: string, context: string) { return `${name.trim().toLowerCase()}|${context.trim().toLowerCase()}` }
+function formatCountLabel(count: number, labels: CountLabel) { return count === 1 ? labels.singular : labels.plural }
 function dedupeSuggestionItems(items: Array<{ context: string; name: string }>) {
   const seen = new Set<string>()
   return items.filter((item) => {
@@ -1351,6 +1385,62 @@ function dedupeSuggestionItems(items: Array<{ context: string; name: string }>) 
   seen.add(key)
   return true
   }).map((item) => ({ context: item.context.trim(), name: item.name.trim() }))
+}
+function parseManualEntries(value: string) {
+  return dedupeSuggestionItems(
+    value
+      .split(/\r?\n|;/)
+      .flatMap(expandManualEntryLine)
+      .map(parseManualEntry)
+      .filter((item) => item.name),
+  )
+}
+function expandManualEntryLine(line: string) {
+  const trimmed = line.trim()
+
+  if (!trimmed) {
+    return []
+  }
+
+  if (shouldSplitManualCommaList(trimmed)) {
+    return trimmed.split(',').map((part) => part.trim()).filter(Boolean)
+  }
+
+  return [trimmed]
+}
+function shouldSplitManualCommaList(value: string) {
+  return value.includes(',') && !value.includes('|') && !value.includes(' - ')
+}
+function parseManualEntry(value: string) {
+  const trimmed = value.trim()
+  const pipeIndex = trimmed.lastIndexOf('|')
+
+  if (pipeIndex > 0) {
+    return {
+      context: trimmed.slice(pipeIndex + 1).trim(),
+      name: trimmed.slice(0, pipeIndex).trim(),
+    }
+  }
+
+  const dashIndex = trimmed.lastIndexOf(' - ')
+
+  if (dashIndex > 0) {
+    return {
+      context: trimmed.slice(dashIndex + 3).trim(),
+      name: trimmed.slice(0, dashIndex).trim(),
+    }
+  }
+
+  const parenMatch = /^(.*?)\s*\(([^)]+)\)\s*$/.exec(trimmed)
+
+  if (parenMatch) {
+    return {
+      context: parenMatch[2].trim(),
+      name: parenMatch[1].trim(),
+    }
+  }
+
+  return { context: '', name: trimmed }
 }
 function isLegacyDefaultProviderSelection(selection: ProviderSelection) {
   return arraysEqual(selection.sources, LEGACY_PROVIDER_SELECTION.sources) && arraysEqual(selection.rankers, LEGACY_PROVIDER_SELECTION.rankers)
