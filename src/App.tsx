@@ -45,7 +45,7 @@ type TierConfig = { color: string; id: string; label: string }
 type BoardState = Record<string, string[]>
 type ProviderSelection = { rankers: RankerProvider[]; sources: SourceProvider[] }
 type TierThemeId = 'custom' | 'forge' | 'aurora' | 'inferno' | 'toxic'
-type SavedState = { board: BoardState; compactMode: boolean; itemsById: Record<string, TierItem>; listContext: string; providerSelection: ProviderSelection; tierThemeId: TierThemeId; title: string; tiers: TierConfig[] }
+type SavedState = { board: BoardState; compactMode: boolean; itemsById: Record<string, TierItem>; listContext: string; providerSelection: ProviderSelection; sidebarCollapsed: boolean; tierThemeId: TierThemeId; title: string; tiers: TierConfig[] }
 type HealthResponse = { mode: string; ok: boolean; providers?: { gemini: { configured: boolean; model: string }; google: { configured: boolean }; groq: { configured: boolean; model: string }; local: { configured: boolean; model: string } }; ranker?: { available?: boolean; error: string | null; model: string; ready: boolean; state: string } }
 type LookupResponse = { candidates?: ImageResult[]; query: string; result: ImageResult }
 type SuggestItemsResponse = { items: Array<{ context: string; name: string }>; title: string }
@@ -130,6 +130,7 @@ function App() {
   const [title, setTitle] = useState(initialState.title)
   const [listContext, setListContext] = useState(initialState.listContext)
   const [compactMode, setCompactMode] = useState(initialState.compactMode)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(initialState.sidebarCollapsed)
   const [providerSelection, setProviderSelection] = useState<ProviderSelection>(initialState.providerSelection)
   const [tierThemeId, setTierThemeId] = useState<TierThemeId>(initialState.tierThemeId)
   const [tiers, setTiers] = useState<TierConfig[]>(initialState.tiers)
@@ -184,7 +185,7 @@ function App() {
     try {
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ board: normalizeBoard(board, tiers, itemsById), compactMode, itemsById, listContext, providerSelection, tierThemeId, title, tiers } satisfies SavedState),
+        JSON.stringify({ board: normalizeBoard(board, tiers, itemsById), compactMode, itemsById, listContext, providerSelection, sidebarCollapsed, tierThemeId, title, tiers } satisfies SavedState),
       )
       storageWarningShownRef.current = false
     } catch (error) {
@@ -197,7 +198,7 @@ function App() {
         })
       }
     }
-  }, [board, compactMode, itemsById, listContext, providerSelection, tierThemeId, tiers, title])
+  }, [board, compactMode, itemsById, listContext, providerSelection, sidebarCollapsed, tierThemeId, tiers, title])
 
   useEffect(() => {
     let cancelled = false
@@ -306,6 +307,7 @@ function App() {
       itemsById: itemsRef.current,
       listContext: listContextRef.current,
       providerSelection: providerSelectionRef.current,
+      sidebarCollapsed,
       tierThemeId: tierThemeRef.current,
       title,
       tiers,
@@ -352,6 +354,7 @@ function App() {
       setTitle(nextState.title)
       setListContext(nextState.listContext)
       setCompactMode(nextState.compactMode)
+      setSidebarCollapsed(nextState.sidebarCollapsed)
       setProviderSelection(nextProviderSelection)
       setTierThemeId(nextState.tierThemeId)
       setTiers(nextState.tiers)
@@ -962,6 +965,7 @@ function App() {
     setTitle(nextState.title)
     setListContext(nextState.listContext)
     setCompactMode(nextState.compactMode)
+    setSidebarCollapsed(nextState.sidebarCollapsed)
     setProviderSelection(filterProviderSelection(nextState.providerSelection, providerAvailability))
     setTierThemeId(nextState.tierThemeId)
     setTiers(nextState.tiers)
@@ -985,6 +989,13 @@ function App() {
       message: 'Cleared the entire tier list and restored the default board.',
       tone: 'success',
     })
+  }
+
+  function toggleSidebar() {
+    setSidebarCollapsed((current) => !current)
+    setMenuOpenId(null)
+    setProviderMenuOpen(false)
+    setThemeMenuOpen(false)
   }
 
   function applyTierTheme(themeId: Exclude<TierThemeId, 'custom'>) {
@@ -1175,63 +1186,81 @@ function App() {
           <Stat label="Mode" value={lookupMode} />
         </div>
       </header>
-      <main className="workspace">
+      <main className={`workspace ${sidebarCollapsed ? 'workspace-sidebar-collapsed' : ''}`}>
         <input accept=".json,application/json" className="visually-hidden" onChange={(event) => { void importListFile(event.currentTarget.files?.[0] || null); event.currentTarget.value = '' }} ref={importFileRef} type="file" />
         <input accept="image/png,image/jpeg,image/webp,image/gif,image/avif" className="visually-hidden" onChange={(event) => { void handleImageUploadSelection(event.currentTarget.files?.[0] || null); event.currentTarget.value = '' }} ref={imageUploadRef} type="file" />
-        <aside className="controls">
-          <Panel title="List Setup" action={<div className="button-row"><button className="ghost-button" onClick={clearPlacements} type="button">Reset placements</button><button className="ghost-button ghost-button-danger" onClick={clearAll} type="button">Clear all</button></div>}>
-            <label className="field"><span>List title</span><input onChange={(event) => setTitle(event.target.value)} placeholder="Best platformers ever made" type="text" value={title} /></label>
-            <label className="field"><span>Context for image matching</span><textarea onChange={(event) => setListContext(event.target.value)} placeholder="Nintendo characters, pizza toppings, horror films, wrestling themes..." rows={4} value={listContext} /></label>
-          </Panel>
-          <Panel title="Item Finder" action={<button className="accent-button" disabled={findingSuggestions || !title.trim()} onClick={() => { void findRelatedItemsFromTitle() }} type="button">{findingSuggestions ? 'Finding items...' : 'Find from title'}</button>}>
-            <div className="finder-manual">
-              <label className="field">
-                <span>Add your own items</span>
-                <textarea onChange={(event) => setManualItemsInput(event.target.value)} placeholder={`Mario\nLuigi\nPrincess Peach | Mario series`} rows={5} value={manualItemsInput} />
-              </label>
-              <div className="finder-manual-toolbar">
-                <span className="finder-summary">One per line works best. Optional context: `Name | Context`, `Name - Context`, or `Name (Context)`.</span>
-                <div className="button-row">
-                  <button className="ghost-button" disabled={!manualItemsInput.trim()} onClick={() => setManualItemsInput('')} type="button">Clear text</button>
-                  <button className="accent-button" disabled={!manualItemsInput.trim()} onClick={addManualItems} type="button">Add typed items</button>
+        <aside className={`controls ${sidebarCollapsed ? 'controls-collapsed' : ''}`}>
+          {sidebarCollapsed ? (
+            <div className="controls-rail">
+              <span className="controls-rail-title">Control Bay</span>
+              <button aria-label="Open sidebar controls" className="ghost-button sidebar-toggle sidebar-toggle-collapsed" onClick={toggleSidebar} type="button">Open</button>
+            </div>
+          ) : (
+            <div className="sidebar-shell">
+              <div className="sidebar-head">
+                <div className="sidebar-copy">
+                  <span className="sidebar-kicker">Control Bay</span>
+                  <strong>List setup, finder, and status</strong>
                 </div>
+                <button aria-label="Collapse sidebar controls" className="ghost-button sidebar-toggle" onClick={toggleSidebar} type="button">Hide</button>
+              </div>
+              <div className="controls-body">
+                <Panel title="List Setup" action={<div className="button-row"><button className="ghost-button" onClick={clearPlacements} type="button">Reset placements</button><button className="ghost-button ghost-button-danger" onClick={clearAll} type="button">Clear all</button></div>}>
+                  <label className="field"><span>List title</span><input onChange={(event) => setTitle(event.target.value)} placeholder="Best platformers ever made" type="text" value={title} /></label>
+                  <label className="field"><span>Context for image matching</span><textarea onChange={(event) => setListContext(event.target.value)} placeholder="Nintendo characters, pizza toppings, horror films, wrestling themes..." rows={4} value={listContext} /></label>
+                </Panel>
+                <Panel title="Item Finder" action={<button className="accent-button" disabled={findingSuggestions || !title.trim()} onClick={() => { void findRelatedItemsFromTitle() }} type="button">{findingSuggestions ? 'Finding items...' : 'Find from title'}</button>}>
+                  <div className="finder-manual">
+                    <label className="field">
+                      <span>Add your own items</span>
+                      <textarea onChange={(event) => setManualItemsInput(event.target.value)} placeholder={`Mario\nLuigi\nPrincess Peach | Mario series`} rows={5} value={manualItemsInput} />
+                    </label>
+                    <div className="finder-manual-toolbar">
+                      <span className="finder-summary">One per line works best. Optional context: `Name | Context`, `Name - Context`, or `Name (Context)`.</span>
+                      <div className="button-row">
+                        <button className="ghost-button" disabled={!manualItemsInput.trim()} onClick={() => setManualItemsInput('')} type="button">Clear text</button>
+                        <button className="accent-button" disabled={!manualItemsInput.trim()} onClick={addManualItems} type="button">Add typed items</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="finder-divider" />
+                  <p className="finder-copy">Use the list title and optional context to generate related items, then add the selected ones or the whole batch to the pool.</p>
+                  {titleSuggestions.length ? (
+                    <>
+                      <div className="finder-toolbar">
+                        <span className="finder-summary">{titleSuggestions.length} suggestions found, {addableSuggestionCount} still addable.</span>
+                        <div className="button-row">
+                          <button className="ghost-button" disabled={!addableSuggestionCount} onClick={selectAllSuggestions} type="button">Select all</button>
+                          <button className="ghost-button" disabled={!selectedSuggestionIds.length} onClick={clearSuggestionSelection} type="button">Clear selection</button>
+                          <button className="ghost-button" disabled={!selectedAddableSuggestionCount} onClick={() => addSuggestedItems('selected')} type="button">Add selected</button>
+                          <button className="accent-button" disabled={!addableSuggestionCount} onClick={() => addSuggestedItems('all')} type="button">Add all</button>
+                        </div>
+                      </div>
+                      <div className="finder-grid">
+                        {titleSuggestions.map((suggestion) => {
+                          const alreadyAdded = existingItemKeys.has(itemKeyFor(suggestion.name, suggestion.context))
+                          const selected = selectedSuggestionIds.includes(suggestion.id)
+
+                          return (
+                            <button className={`finder-card ${selected ? 'finder-card-selected' : ''} ${alreadyAdded ? 'finder-card-disabled' : ''}`} disabled={alreadyAdded} key={suggestion.id} onClick={() => toggleSuggestionSelection(suggestion.id)} type="button">
+                              <span className={`finder-card-flag ${alreadyAdded ? 'finder-card-flag-muted' : selected ? 'finder-card-flag-active' : ''}`}>{alreadyAdded ? 'In pool' : selected ? 'Selected' : 'Pick'}</span>
+                              <strong>{suggestion.name}</strong>
+                              {suggestion.context ? <span>{suggestion.context}</span> : <span>Uses the list title as context.</span>}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </>
+                  ) : (
+                    <div className={`finder-state ${suggestionError ? 'finder-state-error' : ''}`}>{suggestionError || 'Set a title, then generate a batch of related items to review before adding them.'}</div>
+                  )}
+                  <div className="button-row"><button className="accent-button" disabled={bulkRunning || autoPickingItems || !Object.keys(itemsById).length} onClick={() => { void lookupAllImages() }} type="button">{bulkRunning || autoPickingItems ? 'Matching images...' : 'Find images for all'}</button></div>
+                </Panel>
+                <div className={`notice notice-${notice.tone}`}><strong>{backendReady === false ? 'Backend offline.' : 'Status.'}</strong><span>{notice.message}</span></div>
+                <div className="meta-card"><p>Current image APIs: {selectionSummary(providerSelection)}.</p><p>Choose sources and AI rerankers from the `Image APIs` dropdown. With no AI rankers selected, the app falls back to metadata-only matching.</p></div>
               </div>
             </div>
-            <div className="finder-divider" />
-            <p className="finder-copy">Use the list title and optional context to generate related items, then add the selected ones or the whole batch to the pool.</p>
-            {titleSuggestions.length ? (
-              <>
-                <div className="finder-toolbar">
-                  <span className="finder-summary">{titleSuggestions.length} suggestions found, {addableSuggestionCount} still addable.</span>
-                  <div className="button-row">
-                    <button className="ghost-button" disabled={!addableSuggestionCount} onClick={selectAllSuggestions} type="button">Select all</button>
-                    <button className="ghost-button" disabled={!selectedSuggestionIds.length} onClick={clearSuggestionSelection} type="button">Clear selection</button>
-                    <button className="ghost-button" disabled={!selectedAddableSuggestionCount} onClick={() => addSuggestedItems('selected')} type="button">Add selected</button>
-                    <button className="accent-button" disabled={!addableSuggestionCount} onClick={() => addSuggestedItems('all')} type="button">Add all</button>
-                  </div>
-                </div>
-                <div className="finder-grid">
-                  {titleSuggestions.map((suggestion) => {
-                    const alreadyAdded = existingItemKeys.has(itemKeyFor(suggestion.name, suggestion.context))
-                    const selected = selectedSuggestionIds.includes(suggestion.id)
-
-                    return (
-                      <button className={`finder-card ${selected ? 'finder-card-selected' : ''} ${alreadyAdded ? 'finder-card-disabled' : ''}`} disabled={alreadyAdded} key={suggestion.id} onClick={() => toggleSuggestionSelection(suggestion.id)} type="button">
-                        <span className={`finder-card-flag ${alreadyAdded ? 'finder-card-flag-muted' : selected ? 'finder-card-flag-active' : ''}`}>{alreadyAdded ? 'In pool' : selected ? 'Selected' : 'Pick'}</span>
-                        <strong>{suggestion.name}</strong>
-                        {suggestion.context ? <span>{suggestion.context}</span> : <span>Uses the list title as context.</span>}
-                      </button>
-                    )
-                  })}
-                </div>
-              </>
-            ) : (
-              <div className={`finder-state ${suggestionError ? 'finder-state-error' : ''}`}>{suggestionError || 'Set a title, then generate a batch of related items to review before adding them.'}</div>
-            )}
-            <div className="button-row"><button className="accent-button" disabled={bulkRunning || autoPickingItems || !Object.keys(itemsById).length} onClick={() => { void lookupAllImages() }} type="button">{bulkRunning || autoPickingItems ? 'Matching images...' : 'Find images for all'}</button></div>
-          </Panel>
-          <div className={`notice notice-${notice.tone}`}><strong>{backendReady === false ? 'Backend offline.' : 'Status.'}</strong><span>{notice.message}</span></div>
-          <div className="meta-card"><p>Current image APIs: {selectionSummary(providerSelection)}.</p><p>Choose sources and AI rerankers from the `Image APIs` dropdown. With no AI rankers selected, the app falls back to metadata-only matching.</p></div>
+          )}
         </aside>
         <section className="board-column">
           <div className="board-toolbar">
@@ -1564,7 +1593,7 @@ function ImagePickerModal({ candidates, currentImage, error, item, loading, onCh
 }
 function createBaseState(): SavedState {
   const tiers = withTierThemeColors(DEFAULT_TIERS, DEFAULT_TIER_THEME_ID)
-  return { board: createBoard(tiers), compactMode: false, itemsById: {}, listContext: '', providerSelection: DEFAULT_PROVIDER_SELECTION, tierThemeId: DEFAULT_TIER_THEME_ID, title: 'Untitled tier list', tiers }
+  return { board: createBoard(tiers), compactMode: false, itemsById: {}, listContext: '', providerSelection: DEFAULT_PROVIDER_SELECTION, sidebarCollapsed: false, tierThemeId: DEFAULT_TIER_THEME_ID, title: 'Untitled tier list', tiers }
 }
 
 function hydrateSavedState(parsed: Partial<SavedState> | null | undefined): SavedState {
@@ -1580,6 +1609,7 @@ function hydrateSavedState(parsed: Partial<SavedState> | null | undefined): Save
     itemsById,
     listContext: typeof parsed?.listContext === 'string' ? parsed.listContext : '',
     providerSelection: sanitizeProviderSelection(parsed?.providerSelection),
+    sidebarCollapsed: Boolean(parsed?.sidebarCollapsed),
     tierThemeId,
     title: typeof parsed?.title === 'string' ? parsed.title : baseState.title,
     tiers,
