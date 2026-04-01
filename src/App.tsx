@@ -59,6 +59,7 @@ type LaneProps = {
   isPool?: boolean
   items: TierItem[]
   menuOpenId: string | null
+  onDropFiles?: (files: FileList | null) => void
   onDropImage: (itemId: string, files: FileList | null) => void
   onLookup: (itemId: string) => void
   onOpenPicker: (itemId: string) => void
@@ -685,6 +686,92 @@ function App() {
     void applyImageFileToItem(itemId, file)
   }
 
+  async function addDroppedImagesToPool(files: FileList | null) {
+    const imageFiles = getImageFiles(files)
+
+    if (!imageFiles.length) {
+      setNotice({
+        message: 'Drop one or more image files into the pool to create new items.',
+        tone: 'warning',
+      })
+      return
+    }
+
+    setMenuOpenId(null)
+
+    const pendingEntries = imageFiles.map((file, index) => {
+      const id = createId('item')
+      const item: TierItem = {
+        context: '',
+        id,
+        imageStatus: 'loading',
+        name: filenameToItemName(file.name, index + 1),
+        tierId: null,
+      }
+
+      return { file, item }
+    })
+
+    const nextItems = Object.fromEntries(
+      pendingEntries.map((entry) => [entry.item.id, entry.item] as const),
+    )
+    const nextIds = pendingEntries.map((entry) => entry.item.id)
+
+    setItemsById((current) => {
+      const merged = { ...current, ...nextItems }
+      itemsRef.current = merged
+      return merged
+    })
+    updateBoard((current) => ({
+      ...current,
+      [POOL_ID]: [...getContainerItems(current, POOL_ID), ...nextIds],
+    }))
+    setNotice({
+      message: `Adding ${pendingEntries.length} dropped image${pendingEntries.length === 1 ? '' : 's'} to the pool...`,
+      tone: 'info',
+    })
+
+    let ready = 0
+    let failed = 0
+    let cursor = 0
+    const concurrency = Math.min(3, pendingEntries.length)
+
+    async function worker() {
+      while (cursor < pendingEntries.length) {
+        const entry = pendingEntries[cursor]
+        cursor += 1
+
+        try {
+          const previewUrl = await resizeImageFile(entry.file)
+          patchItem(entry.item.id, {
+            image: createCustomImageResult(entry.item, previewUrl),
+            imageError: '',
+            imageStatus: 'ready',
+          })
+          ready += 1
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : `Unable to use ${entry.file.name} as an image item.`
+          patchItem(entry.item.id, {
+            imageError: message,
+            imageStatus: 'error',
+          })
+          failed += 1
+        }
+      }
+    }
+
+    await Promise.all(Array.from({ length: concurrency }, () => worker()))
+    setNotice({
+      message: failed
+        ? `Added ${pendingEntries.length} image items to the pool. ${ready} are ready and ${failed} need attention.`
+        : `Added ${pendingEntries.length} image item${pendingEntries.length === 1 ? '' : 's'} to the pool.`,
+      tone: failed ? 'warning' : 'success',
+    })
+  }
+
   function toggleSourceProvider(provider: SourceProvider) {
     if (provider === 'google' && !providerAvailability.google) {
       setNotice({
@@ -1103,7 +1190,7 @@ function App() {
                 ))}
               </div>
               <div className="pool-island-wrap">
-                <TierLane color="#7a808e" emptyMessage="Unplaced cards drift here." id={POOL_ID} isPool items={poolItems} menuOpenId={menuOpenId} onDropImage={handleImageDrop} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} title="Pool" />
+                <TierLane color="#7a808e" emptyMessage="Drop cards here or drop image files to create new items." id={POOL_ID} isPool items={poolItems} menuOpenId={menuOpenId} onDropFiles={(files) => { void addDroppedImagesToPool(files) }} onDropImage={handleImageDrop} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} title="Pool" />
               </div>
               <DragOverlay>{activeItem ? <CardShell item={activeItem} overlay /> : null}</DragOverlay>
             </DndContext>
@@ -1123,10 +1210,63 @@ function Stat({ label, value }: { label: string; value: string }) {
   return <div className="stat-card"><span>{label}</span><strong>{value}</strong></div>
 }
 
-function TierLane({ color, emptyMessage, id, isPool = false, items, menuOpenId, onDropImage, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload, title }: LaneProps) {
+function TierLane({ color, emptyMessage, id, isPool = false, items, menuOpenId, onDropFiles, onDropImage, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload, title }: LaneProps) {
   const { isOver, setNodeRef } = useDroppable({ id })
+  const [isFileOver, setIsFileOver] = useState(false)
+  const fileDragDepthRef = useRef(0)
+
+  function resetLaneFileDropState() {
+    fileDragDepthRef.current = 0
+    setIsFileOver(false)
+  }
+
+  function handleLaneDragEnter(event: React.DragEvent<HTMLElement>) {
+    if (!isPool || !onDropFiles || !hasImageFilePayload(event.dataTransfer)) {
+      return
+    }
+
+    event.preventDefault()
+    fileDragDepthRef.current += 1
+    setIsFileOver(true)
+  }
+
+  function handleLaneDragOver(event: React.DragEvent<HTMLElement>) {
+    if (!isPool || !onDropFiles || !hasImageFilePayload(event.dataTransfer)) {
+      return
+    }
+
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    if (!isFileOver) {
+      setIsFileOver(true)
+    }
+  }
+
+  function handleLaneDragLeave(event: React.DragEvent<HTMLElement>) {
+    if (!isPool || !onDropFiles || !hasImageFilePayload(event.dataTransfer)) {
+      return
+    }
+
+    event.preventDefault()
+    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1)
+
+    if (fileDragDepthRef.current === 0) {
+      setIsFileOver(false)
+    }
+  }
+
+  function handleLaneDrop(event: React.DragEvent<HTMLElement>) {
+    if (!isPool || !onDropFiles || !hasImageFilePayload(event.dataTransfer)) {
+      return
+    }
+
+    event.preventDefault()
+    resetLaneFileDropState()
+    onDropFiles(event.dataTransfer.files)
+  }
+
   return (
-    <section className={`lane ${isOver ? 'lane-over' : ''} ${isPool ? 'lane-pool' : ''}`} ref={setNodeRef} style={{ '--lane-color': color } as CSSProperties}>
+    <section className={`lane ${isOver ? 'lane-over' : ''} ${isPool ? 'lane-pool' : ''} ${isFileOver ? 'lane-file-over' : ''}`} onDragEnter={handleLaneDragEnter} onDragLeave={handleLaneDragLeave} onDragOver={handleLaneDragOver} onDrop={handleLaneDrop} ref={setNodeRef} style={{ '--lane-color': color } as CSSProperties}>
       <div className="lane-label"><span>{title}</span><strong>{items.length}</strong></div>
       <SortableContext items={items.map((item) => item.id)} strategy={rectSortingStrategy}>
         <div className="lane-grid">
@@ -1134,6 +1274,7 @@ function TierLane({ color, emptyMessage, id, isPool = false, items, menuOpenId, 
           {!items.length ? <div className="lane-empty">{emptyMessage}</div> : null}
         </div>
       </SortableContext>
+      {isPool && isFileOver ? <div className="lane-drop-hint"><strong>Drop images to add cards</strong><span>Each file becomes a new pool item using the filename as its title.</span></div> : null}
     </section>
   )
 }
@@ -1153,7 +1294,7 @@ function CardShell({ item, menuOpen = false, onDropImage, onLookup, onOpenPicker
   }
 
   function handleDragEnter(event: React.DragEvent<HTMLElement>) {
-    if (overlay || !hasImageFilePayload(event.dataTransfer)) {
+    if (overlay || !hasSingleImageFilePayload(event.dataTransfer)) {
       return
     }
 
@@ -1164,7 +1305,7 @@ function CardShell({ item, menuOpen = false, onDropImage, onLookup, onOpenPicker
   }
 
   function handleDragOver(event: React.DragEvent<HTMLElement>) {
-    if (overlay || !hasImageFilePayload(event.dataTransfer)) {
+    if (overlay || !hasSingleImageFilePayload(event.dataTransfer)) {
       return
     }
 
@@ -1177,7 +1318,7 @@ function CardShell({ item, menuOpen = false, onDropImage, onLookup, onOpenPicker
   }
 
   function handleDragLeave(event: React.DragEvent<HTMLElement>) {
-    if (overlay || !hasImageFilePayload(event.dataTransfer)) {
+    if (overlay || !hasSingleImageFilePayload(event.dataTransfer)) {
       return
     }
 
@@ -1191,7 +1332,7 @@ function CardShell({ item, menuOpen = false, onDropImage, onLookup, onOpenPicker
   }
 
   function handleDrop(event: React.DragEvent<HTMLElement>) {
-    if (overlay || !hasImageFilePayload(event.dataTransfer)) {
+    if (overlay || !hasSingleImageFilePayload(event.dataTransfer)) {
       return
     }
 
@@ -1413,13 +1554,34 @@ function loadImageElement(src: string): Promise<HTMLImageElement> {
   })
 }
 
-function hasImageFilePayload(dataTransfer: DataTransfer | null) {
+function getImageFiles(value: FileList | null | undefined) { return Array.from(value || []).filter((file) => file.type.startsWith('image/')) }
+function getDraggedImageFileCount(dataTransfer: DataTransfer | null) {
   if (!dataTransfer) {
-    return false
+    return 0
   }
 
-  const fileTypes = Array.from(dataTransfer.types || [])
-  return fileTypes.includes('Files')
+  const itemEntries = Array.from(dataTransfer.items || []).filter((item) => item.kind === 'file')
+
+  if (itemEntries.length) {
+    return itemEntries.filter((item) => item.type.startsWith('image/')).length
+  }
+
+  return getImageFiles(dataTransfer.files).length
+}
+function hasImageFilePayload(dataTransfer: DataTransfer | null) { return getDraggedImageFileCount(dataTransfer) > 0 }
+function hasSingleImageFilePayload(dataTransfer: DataTransfer | null) { return getDraggedImageFileCount(dataTransfer) === 1 }
+function filenameToItemName(filename: string, fallbackIndex: number) {
+  const base = filename
+    .replace(/\.[a-z0-9]{2,5}$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!base) {
+    return `Uploaded image ${fallbackIndex}`
+  }
+
+  return base.replace(/\b[a-z]/g, (character) => character.toUpperCase())
 }
 
 function createBoard(tiers: TierConfig[]): BoardState { return { [POOL_ID]: [], ...Object.fromEntries(tiers.map((tier) => [tier.id, []])) } }

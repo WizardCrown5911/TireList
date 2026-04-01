@@ -735,6 +735,13 @@
     0 0 28px color-mix(in srgb, var(--lane-color), transparent 68%);
 }
 
+.lane-file-over {
+  border-color: rgba(176, 202, 255, 0.52);
+  box-shadow:
+    inset 0 0 0 1px rgba(163, 193, 255, 0.28),
+    0 0 32px rgba(80, 146, 255, 0.18);
+}
+
 .lane-pool {
   position: relative;
   min-height: 152px;
@@ -760,6 +767,38 @@
   background: radial-gradient(circle, rgba(0, 0, 0, 0.32), transparent 72%);
   filter: blur(10px);
   pointer-events: none;
+}
+
+.lane-drop-hint {
+  position: absolute;
+  inset: 14px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 18px;
+  border: 1px dashed rgba(212, 224, 255, 0.56);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(10, 14, 22, 0.12), rgba(10, 14, 22, 0.82)),
+    radial-gradient(circle at top left, rgba(120, 157, 255, 0.24), transparent 42%);
+  color: #f1f5ff;
+  pointer-events: none;
+}
+
+.lane-drop-hint strong {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.lane-drop-hint span {
+  max-width: 28ch;
+  color: #d7e3fb;
+  font-size: 0.84rem;
+  line-height: 1.4;
 }
 
 .lane-label {
