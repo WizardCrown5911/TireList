@@ -87,9 +87,13 @@ const DEFAULT_TIERS: TierConfig[] = [
 ]
 const SOURCE_PROVIDER_ORDER: SourceProvider[] = ['commons', 'wikipedia', 'openverse', 'google']
 const RANKER_PROVIDER_ORDER: RankerProvider[] = ['local', 'gemini', 'groq']
-const DEFAULT_PROVIDER_SELECTION: ProviderSelection = {
+const LEGACY_PROVIDER_SELECTION: ProviderSelection = {
   rankers: [...RANKER_PROVIDER_ORDER],
   sources: [...SOURCE_PROVIDER_ORDER],
+}
+const DEFAULT_PROVIDER_SELECTION: ProviderSelection = {
+  rankers: ['gemini'],
+  sources: ['openverse'],
 }
 
 function App() {
@@ -176,10 +180,11 @@ function App() {
             local: payload.providers?.local?.configured !== false,
           })
           setProviderSelection((current) => {
-            const nextSources = current.sources.filter((provider) =>
+            const baseSelection = isLegacyDefaultProviderSelection(current) ? DEFAULT_PROVIDER_SELECTION : current
+            const nextSources = baseSelection.sources.filter((provider) =>
               provider === 'google' ? Boolean(payload.providers?.google?.configured) : true,
             )
-            const nextRankers = current.rankers.filter((provider) =>
+            const nextRankers = baseSelection.rankers.filter((provider) =>
               provider === 'local'
                 ? payload.providers?.local?.configured !== false
                 : provider === 'gemini'
@@ -1351,9 +1356,15 @@ function dedupeSuggestionItems(items: Array<{ context: string; name: string }>) 
       return false
     }
 
-    seen.add(key)
-    return true
+  seen.add(key)
+  return true
   }).map((item) => ({ context: item.context.trim(), name: item.name.trim() }))
+}
+function isLegacyDefaultProviderSelection(selection: ProviderSelection) {
+  return arraysEqual(selection.sources, LEGACY_PROVIDER_SELECTION.sources) && arraysEqual(selection.rankers, LEGACY_PROVIDER_SELECTION.rankers)
+}
+function arraysEqual<T>(left: T[], right: T[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index])
 }
 function matchMethodLabel(method: MatchMethod) { switch (method) { case 'local-ai': return 'local AI scoring'; case 'gemini': return 'Gemini fallback'; case 'groq': return 'Groq fallback'; default: return 'heuristic fallback' } }
 function matchMethodShortLabel(method: MatchMethod) { switch (method) { case 'local-ai': return 'Local AI'; case 'gemini': return 'Gemini'; case 'groq': return 'Groq'; case 'manual': return 'Manual'; default: return 'Heuristic' } }
