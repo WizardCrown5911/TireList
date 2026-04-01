@@ -1,0 +1,105 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Orbitron:wght@500;700;800&family=Space+Grotesk:wght@400;500;700&display=swap');
+
+:root {
+  color-scheme: dark;
+  font-family: 'Space Grotesk', sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --font-heading: 'Orbitron', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --bg: #040814;
+  --bg-deep: #02050c;
+  --panel: rgba(8, 14, 31, 0.88);
+  --border: rgba(91, 124, 201, 0.24);
+  --text: #edf4ff;
+  --muted: #90a3c9;
+  --shadow: 0 24px 72px rgba(0, 0, 0, 0.38);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(47, 107, 255, 0.22), transparent 28%),
+    radial-gradient(circle at 88% 12%, rgba(255, 53, 94, 0.14), transparent 26%),
+    linear-gradient(180deg, #07101d 0%, #040813 48%, #02050b 100%);
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(80, 110, 196, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(80, 110, 196, 0.08) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(180deg, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0.08));
+  pointer-events: none;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at center, transparent 55%, rgba(0, 0, 0, 0.42));
+  pointer-events: none;
+}
+
+body,
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button,
+input,
+textarea {
+  appearance: none;
+}
+
+button {
+  color: inherit;
+}
+
+img {
+  max-width: 100%;
+}
+
+a {
+  color: inherit;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading);
+}
+
+code {
+  font-family: var(--font-mono);
+  padding: 0.08rem 0.34rem;
+  border: 1px solid rgba(87, 119, 197, 0.22);
+  border-radius: 0.45rem;
+  background: rgba(7, 13, 29, 0.9);
+}
+
+#root {
+  position: relative;
+  min-height: 100vh;
+}
