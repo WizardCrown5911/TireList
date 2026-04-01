@@ -46,8 +46,9 @@ type BoardState = Record<string, string[]>
 type ProviderSelection = { rankers: RankerProvider[]; sources: SourceProvider[] }
 type TierThemeId = 'custom' | 'forge' | 'aurora' | 'inferno' | 'toxic'
 type SavedState = { board: BoardState; compactMode: boolean; itemsById: Record<string, TierItem>; listContext: string; providerSelection: ProviderSelection; sidebarCollapsed: boolean; tierThemeId: TierThemeId; title: string; tiers: TierConfig[] }
-type HealthResponse = { mode: string; ok: boolean; providers?: { gemini: { configured: boolean; model: string }; google: { configured: boolean }; groq: { configured: boolean; model: string }; local: { configured: boolean; model: string } }; ranker?: { available?: boolean; error: string | null; model: string; ready: boolean; state: string } }
+type HealthResponse = { integrations?: { discord: { configured: boolean } }; mode: string; ok: boolean; providers?: { gemini: { configured: boolean; model: string }; google: { configured: boolean }; groq: { configured: boolean; model: string }; local: { configured: boolean; model: string } }; ranker?: { available?: boolean; error: string | null; model: string; ready: boolean; state: string } }
 type LookupResponse = { candidates?: ImageResult[]; query: string; result: ImageResult }
+type DiscordShareResponse = { channelId: string; messageId: string; ok: boolean }
 type SuggestItemsResponse = { items: Array<{ context: string; name: string }>; title: string }
 type Notice = { message: string; tone: NoticeTone }
 type PickerState = { candidates: ImageResult[]; error: string; itemId: string | null; loading: boolean; query: string; recommendedId: string | null }
@@ -146,6 +147,7 @@ function App() {
     tone: 'info',
   })
   const [backendReady, setBackendReady] = useState<boolean | null>(null)
+  const [discordConfigured, setDiscordConfigured] = useState(false)
   const [lookupMode, setLookupMode] = useState('Local CLIP')
   const [providerAvailability, setProviderAvailability] = useState({ gemini: false, google: false, groq: false, local: true })
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -153,6 +155,7 @@ function App() {
   const [tierDropTargetId, setTierDropTargetId] = useState<string | null>(null)
   const [autoPickingItems, setAutoPickingItems] = useState(false)
   const [bulkRunning, setBulkRunning] = useState(false)
+  const [sharingToDiscord, setSharingToDiscord] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [providerMenuOpen, setProviderMenuOpen] = useState(false)
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
@@ -164,7 +167,7 @@ function App() {
     query: '',
     recommendedId: null,
   })
-  const boardRef = useRef<HTMLDivElement | null>(null)
+  const boardExportRef = useRef<HTMLDivElement | null>(null)
   const importFileRef = useRef<HTMLInputElement | null>(null)
   const imageUploadRef = useRef<HTMLInputElement | null>(null)
   const boardStateRef = useRef(initialState.board)
@@ -209,6 +212,7 @@ function App() {
         const payload = (await response.json()) as HealthResponse
         if (!cancelled) {
           setBackendReady(payload.ok)
+          setDiscordConfigured(Boolean(payload.integrations?.discord?.configured))
           setLookupMode(payload.mode)
           setProviderAvailability({
             gemini: Boolean(payload.providers?.gemini?.configured),
@@ -242,6 +246,7 @@ function App() {
       } catch {
         if (!cancelled) {
           setBackendReady(false)
+          setDiscordConfigured(false)
           setLookupMode('Offline')
         }
       }
@@ -936,17 +941,87 @@ function App() {
     }
   }
 
+  async function captureBoardImage() {
+    if (!boardExportRef.current) {
+      throw new Error('The tier board is not ready to export yet.')
+    }
+
+    setMenuOpenId(null)
+    await waitForNextPaint()
+
+    return toPng(boardExportRef.current, {
+      cacheBust: true,
+      filter: (node) => !(node instanceof HTMLElement && node.classList.contains('lane-add-button')),
+      pixelRatio: 2,
+    })
+  }
+
   async function exportBoard() {
-    if (!boardRef.current) return
     try {
-      const dataUrl = await toPng(boardRef.current, { cacheBust: true, pixelRatio: 2 })
+      const dataUrl = await captureBoardImage()
       const link = document.createElement('a')
       link.download = `${slugify(title || 'tier-list')}.png`
       link.href = dataUrl
       link.click()
-      setNotice({ message: 'Exported the current board as a PNG.', tone: 'success' })
-    } catch {
-      setNotice({ message: 'Export failed. Some remote images may not expose CORS headers for canvas export.', tone: 'error' })
+      setNotice({ message: 'Exported the tier board as a PNG without the pool.', tone: 'success' })
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Export failed. Some remote images may not expose CORS headers for canvas export.'
+      setNotice({ message, tone: 'error' })
+    }
+  }
+
+  async function shareBoardToDiscord() {
+    if (backendReady === false) {
+      setNotice({
+        message: 'Discord sharing needs the backend online.',
+        tone: 'warning',
+      })
+      return
+    }
+
+    if (!discordConfigured) {
+      setNotice({
+        message: 'Discord bot sharing is not configured yet. Add `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID` on the server.',
+        tone: 'warning',
+      })
+      return
+    }
+
+    setSharingToDiscord(true)
+
+    try {
+      const imageDataUrl = await captureBoardImage()
+      const response = await fetch('/api/discord/share', {
+        body: JSON.stringify({
+          imageDataUrl,
+          listContext,
+          title,
+        }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      })
+      const payload = (await response.json()) as DiscordShareResponse | { error?: string }
+      const errorMessage = 'error' in payload ? payload.error : undefined
+
+      if (!response.ok || !('ok' in payload)) {
+        throw new Error(errorMessage || 'Unable to share this tier list to Discord.')
+      }
+
+      setNotice({
+        message: `Shared "${title || 'Untitled tier list'}" to Discord.`,
+        tone: 'success',
+      })
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Unable to share this tier list to Discord.'
+      setNotice({ message, tone: 'error' })
+    } finally {
+      setSharingToDiscord(false)
     }
   }
 
@@ -1257,7 +1332,7 @@ function App() {
                   <div className="button-row"><button className="accent-button" disabled={bulkRunning || autoPickingItems || !Object.keys(itemsById).length} onClick={() => { void lookupAllImages() }} type="button">{bulkRunning || autoPickingItems ? 'Matching images...' : 'Find images for all'}</button></div>
                 </Panel>
                 <div className={`notice notice-${notice.tone}`}><strong>{backendReady === false ? 'Backend offline.' : 'Status.'}</strong><span>{notice.message}</span></div>
-                <div className="meta-card"><p>Current image APIs: {selectionSummary(providerSelection)}.</p><p>Choose sources and AI rerankers from the `Image APIs` dropdown. With no AI rankers selected, the app falls back to metadata-only matching.</p></div>
+                <div className="meta-card"><p>Current image APIs: {selectionSummary(providerSelection)}.</p><p>Choose sources and AI rerankers from the `Image APIs` dropdown. With no AI rankers selected, the app falls back to metadata-only matching.</p><p>Discord share: {discordConfigured ? 'enabled for the current board.' : 'disabled until the bot token and channel ID are added on the server.'}</p></div>
               </div>
             </div>
           )}
@@ -1341,12 +1416,13 @@ function App() {
               <button className="ghost-button" onClick={downloadListFile} type="button">Save list</button>
               <button className="ghost-button" onClick={openImportDialog} type="button">Import list</button>
               <button className={`ghost-button ${compactMode ? 'ghost-button-active' : ''}`} onClick={() => setCompactMode((current) => !current)} type="button">{compactMode ? 'Standard cards' : 'Compact mode'}</button>
+              <button className="ghost-button" disabled={sharingToDiscord} onClick={() => void shareBoardToDiscord()} type="button">{sharingToDiscord ? 'Sharing...' : 'Share to Discord'}</button>
               <button className="accent-button" onClick={() => void exportBoard()} type="button">Export PNG</button>
             </div>
           </div>
-          <div className={`board-surface ${compactMode ? 'board-surface-compact' : ''}`} ref={boardRef}>
+          <div className={`board-surface ${compactMode ? 'board-surface-compact' : ''}`}>
             <DndContext collisionDetection={collisionDetectionStrategy} onDragCancel={handleDragCancel} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragStart={handleDragStart} sensors={sensors}>
-              <div className="board-shell">
+              <div className="board-shell" ref={boardExportRef}>
                 {tiers.map((tier) => (
                   <TierLane color={tier.color} emptyMessage={`Drop cards into ${tier.label}.`} header={<TierEditorHeader count={getContainerItems(board, tier.id).length} dropTarget={Boolean(draggingTierId) && tierDropTargetId === tier.id && draggingTierId !== tier.id} onColorChange={(value) => updateTier(tier.id, 'color', value)} onDragEnd={resetTierDragState} onDragOver={(event) => handleTierHeaderDragOver(event, tier.id)} onDragStart={(event) => handleTierHeaderDragStart(event, tier.id)} onDrop={(event) => handleTierHeaderDrop(event, tier.id)} onLabelChange={(value) => updateTier(tier.id, 'label', value)} onRemove={() => removeTier(tier.id)} removable={tiers.length > 1} tier={tier} dragging={draggingTierId === tier.id} />} id={tier.id} items={mapIdsToItems(board[tier.id] || [], itemsById)} key={tier.id} menuOpenId={menuOpenId} onDropImage={handleImageDrop} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} />
                 ))}
@@ -1979,5 +2055,11 @@ function sourceProviderDescription(provider: SourceProvider, disabled = false) {
 function rankerProviderLabel(provider: RankerProvider) { switch (provider) { case 'local': return 'Local CLIP'; case 'gemini': return 'Gemini'; default: return 'Groq' } }
 function rankerProviderDescription(provider: RankerProvider, disabled = false) { if (disabled) return provider === 'local' ? 'Disabled on this server.' : provider === 'gemini' ? 'Unavailable until GEMINI_API_KEY is set.' : 'Unavailable until GROQ_API_KEY is set.'; switch (provider) { case 'local': return 'Runs on-device before any hosted fallback.'; case 'gemini': return 'Hosted multimodal reranker for harder matches.'; default: return 'Hosted fallback reranker after public image search.' } }
 function selectionSummary(selection: ProviderSelection) { return `${selection.sources.length === SOURCE_PROVIDER_ORDER.length ? 'All sources' : selection.sources.map(sourceProviderLabel).join(' + ')} / ${selection.rankers.length === RANKER_PROVIDER_ORDER.length ? 'Auto AI' : selection.rankers.length ? selection.rankers.map(rankerProviderLabel).join(' + ') : 'Heuristic only'}` }
+
+function waitForNextPaint() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve())
+  })
+}
 
 export default App

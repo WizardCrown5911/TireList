@@ -14,6 +14,7 @@ A full-stack tier-list builder with:
 - local AI image ranking
 - optional Gemini and Groq reranking
 - PNG export
+- Discord bot sharing for the current tier board
 - Render free-host deployment config
 
 ## How it works
@@ -24,6 +25,7 @@ When you ask the app to find images, the server:
 2. Uses a local CLIP model via Transformers.js to score the candidate images.
 3. Optionally reranks low-confidence matches with Gemini and then Groq if keys are configured.
 4. Falls back to metadata ranking if no model path is available.
+5. Can post the current tier board image to a Discord channel through a bot if `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID` are configured.
 
 ## Setup
 
@@ -46,6 +48,8 @@ GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.5-flash
 GROQ_API_KEY=
 GROQ_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+DISCORD_BOT_TOKEN=
+DISCORD_CHANNEL_ID=
 ```
 
 3. Start the app:
@@ -83,6 +87,17 @@ GEMINI_API_KEY=...
 
 Disabling local CLIP on a free host avoids repeated model downloads on cold starts and keeps the app usable with Google Images plus Gemini/Groq or heuristic fallback.
 
+## Discord bot setup
+
+To enable the `Share to Discord` button:
+
+1. Create or reuse a Discord application bot.
+2. Invite it to your server with permission to post in the target channel.
+3. Set `DISCORD_BOT_TOKEN` to the bot token.
+4. Set `DISCORD_CHANNEL_ID` to the text channel where tier lists should be posted.
+
+The app sends the current open tier board as a PNG attachment and excludes the pool from that image.
+
 ## Scripts
 
 - `npm run dev` starts the client and server together
@@ -109,6 +124,7 @@ That extra context is included in the image search request.
 - Google Images is optional and requires `GOOGLE_API_KEY` plus `GOOGLE_CSE_ID`.
 - Gemini and Groq are optional hosted fallbacks for tougher matches. Their free tiers and rate limits can change over time.
 - PNG export may fail for some third-party remote images if the source blocks canvas use via CORS.
+- PNG export and Discord share both capture only the tier board, not the floating pool.
 - Each card now supports an image picker so users can manually choose from ranked candidate results.
 - Image matching uses local AI first, then optional hosted fallbacks, then heuristics across the public-source candidate set.
 - Lists can be exported to JSON and imported back later with images, tiers, placements, and compact mode preserved.
