@@ -8,6 +8,9 @@ const GROQ_MODEL =
   ensureString(process.env.GROQ_MODEL) ||
   'meta-llama/llama-4-scout-17b-16e-instruct'
 const REQUEST_TIMEOUT_MS = 18_000
+const WIKIPEDIA_SEARCH_TIMEOUT_MS = 10_000
+const suggestionCache = new Map()
+let geminiCooldownUntil = 0
 
 const SUGGESTION_SCHEMA = {
   type: 'object',
@@ -42,37 +45,58 @@ export async function suggestRelatedItems({
   title,
 }) {
   const count = clamp(Math.round(Number(limit) || 18), 8, 24)
+  const cacheKey = `${title.toLowerCase()}|${listContext.toLowerCase()}|${count}`
+  const cached = suggestionCache.get(cacheKey)
   const errors = []
 
-  if (GEMINI_API_KEY) {
+  if (cached) {
+    return cached
+  }
+
+  if (GEMINI_API_KEY && Date.now() >= geminiCooldownUntil) {
     try {
-      return await suggestWithGemini({
+      const items = await suggestWithGemini({
         count,
         listContext,
         title,
       })
+      suggestionCache.set(cacheKey, items)
+      return items
     } catch (error) {
+      if (isQuotaError(error)) {
+        geminiCooldownUntil = Date.now() + extractRetryDelayMs(error)
+      }
       errors.push(formatProviderError('Gemini', error))
     }
   }
 
   if (GROQ_API_KEY) {
     try {
-      return await suggestWithGroq({
+      const items = await suggestWithGroq({
         count,
         listContext,
         title,
       })
+      suggestionCache.set(cacheKey, items)
+      return items
     } catch (error) {
       errors.push(formatProviderError('Groq', error))
     }
   }
 
-  throw new Error(
-    errors.length
-      ? errors.join(' ')
-      : 'Related item suggestions need Gemini or Groq configured.',
-  )
+  try {
+    const items = await suggestWithWikipediaSearch({
+      count,
+      listContext,
+      title,
+    })
+    suggestionCache.set(cacheKey, items)
+    return items
+  } catch (error) {
+    errors.push(formatProviderError('Wikipedia fallback', error))
+  }
+
+  throw new Error(errors.join(' ') || 'Unable to generate related items right now.')
 }
 
 async function suggestWithGemini({ count, listContext, title }) {
@@ -224,6 +248,96 @@ function normalizeSuggestionItems(value, count) {
   return items
 }
 
+async function suggestWithWikipediaSearch({ count, listContext, title }) {
+  const queries = buildWikipediaQueries(title, listContext)
+  const batches = await Promise.all(queries.map((query) => searchWikipediaTitles(query, count)))
+  const titles = dedupeWikipediaTitles(batches.flat())
+  const items = titles
+    .map(parseWikipediaTitle)
+    .filter((item) => item && item.name)
+    .slice(0, count)
+
+  if (!items.length) {
+    throw new Error('Wikipedia search did not return any usable related items.')
+  }
+
+  return items
+}
+
+function buildWikipediaQueries(title, listContext) {
+  const cleanedTitle = normalizeSearchText(title)
+  const context = normalizeSearchText(listContext)
+  const variants = [
+    cleanedTitle,
+    context ? `${cleanedTitle} ${context}` : '',
+    stripTierlistWords(cleanedTitle),
+    context ? stripTierlistWords(`${cleanedTitle} ${context}`) : '',
+  ]
+
+  return Array.from(new Set(variants.filter(Boolean)))
+}
+
+async function searchWikipediaTitles(query, count) {
+  const url = new URL('https://en.wikipedia.org/w/api.php')
+  url.searchParams.set('action', 'query')
+  url.searchParams.set('format', 'json')
+  url.searchParams.set('list', 'search')
+  url.searchParams.set('srsearch', query)
+  url.searchParams.set('srlimit', String(Math.min(Math.max(count, 8), 20)))
+  url.searchParams.set('srnamespace', '0')
+  url.searchParams.set('origin', '*')
+
+  const payload = await fetchJson(url, {
+    signal: AbortSignal.timeout(WIKIPEDIA_SEARCH_TIMEOUT_MS),
+  })
+
+  return Array.isArray(payload?.query?.search)
+    ? payload.query.search.map((entry) => ensureString(entry?.title)).filter(Boolean)
+    : []
+}
+
+function dedupeWikipediaTitles(titles) {
+  const seen = new Set()
+  const filtered = []
+
+  for (const title of titles) {
+    const normalized = title.toLowerCase()
+
+    if (!title || seen.has(normalized) || shouldSkipWikipediaTitle(title)) {
+      continue
+    }
+
+    seen.add(normalized)
+    filtered.push(title)
+  }
+
+  return filtered
+}
+
+function shouldSkipWikipediaTitle(title) {
+  const normalized = title.toLowerCase()
+  return (
+    normalized.startsWith('list of ') ||
+    normalized.startsWith('category:') ||
+    normalized.startsWith('portal:') ||
+    normalized.startsWith('wikipedia:') ||
+    normalized.includes('disambiguation')
+  )
+}
+
+function parseWikipediaTitle(title) {
+  const match = /^(.*?)\s*\(([^)]+)\)\s*$/.exec(title)
+
+  if (!match) {
+    return { context: '', name: title }
+  }
+
+  return {
+    context: match[2].trim(),
+    name: match[1].trim(),
+  }
+}
+
 async function fetchJson(url, init = {}) {
   const response = await fetch(url, {
     ...init,
@@ -246,6 +360,22 @@ async function fetchJson(url, init = {}) {
   }
 
   return payload
+}
+
+function isQuotaError(error) {
+  const message = error instanceof Error ? error.message.toLowerCase() : ''
+  return message.includes('quota') || message.includes('rate limit') || message.includes('resource_exhausted')
+}
+
+function extractRetryDelayMs(error) {
+  const message = error instanceof Error ? error.message : ''
+  const secondsMatch = /retry in\s+(\d+(?:\.\d+)?)/i.exec(message)
+
+  if (secondsMatch) {
+    return Math.max(5_000, Math.ceil(Number(secondsMatch[1]) * 1000))
+  }
+
+  return 60_000
 }
 
 function extractGeminiText(payload) {
@@ -323,6 +453,17 @@ function formatProviderError(provider, error) {
 
 function truncate(value, length) {
   return value.length > length ? `${value.slice(0, length).trim()}...` : value
+}
+
+function normalizeSearchText(value) {
+  return ensureString(value).replace(/\s+/g, ' ').trim()
+}
+
+function stripTierlistWords(value) {
+  return value
+    .replace(/\b(best|worst|top|favorite|favourite|ranking|ranked|tier|tierlist|list)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function ensureString(value) {

@@ -349,14 +349,6 @@ function App() {
       return
     }
 
-    if (!providerAvailability.gemini && !providerAvailability.groq) {
-      setNotice({
-        message: 'Related item generation needs Gemini or Groq configured on the server.',
-        tone: 'warning',
-      })
-      return
-    }
-
     setFindingSuggestions(true)
     setSuggestionError('')
 

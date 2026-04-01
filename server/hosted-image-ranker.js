@@ -8,6 +8,7 @@ const GROQ_MODEL =
 const REQUEST_TIMEOUT_MS = 18_000
 const MAX_HOSTED_CANDIDATES = 5
 const MAX_INLINE_IMAGE_BYTES = 1_800_000
+let geminiCooldownUntil = 0
 
 const SELECTION_SCHEMA = {
   type: 'object',
@@ -60,7 +61,7 @@ export async function chooseCandidateWithHostedAi({
   }
 
   for (const provider of providers) {
-    if (provider === 'gemini' && GEMINI_API_KEY) {
+    if (provider === 'gemini' && GEMINI_API_KEY && Date.now() >= geminiCooldownUntil) {
       try {
         return await chooseWithGemini({
           candidates: shortlist,
@@ -69,6 +70,9 @@ export async function chooseCandidateWithHostedAi({
           listContext,
         })
       } catch (error) {
+        if (isQuotaError(error)) {
+          geminiCooldownUntil = Date.now() + extractRetryDelayMs(error)
+        }
         errors.push(formatProviderError('Gemini', error))
       }
     }
@@ -414,6 +418,26 @@ function extractApiError(payload) {
     ensureString(payload?.message) ||
     ensureString(payload?.promptFeedback?.blockReason)
   )
+}
+
+function isQuotaError(error) {
+  const message = error instanceof Error ? error.message.toLowerCase() : ''
+  return (
+    message.includes('quota') ||
+    message.includes('rate limit') ||
+    message.includes('resource_exhausted')
+  )
+}
+
+function extractRetryDelayMs(error) {
+  const message = error instanceof Error ? error.message : ''
+  const secondsMatch = /retry in\s+(\d+(?:\.\d+)?)/i.exec(message)
+
+  if (secondsMatch) {
+    return Math.max(5_000, Math.ceil(Number(secondsMatch[1]) * 1000))
+  }
+
+  return 60_000
 }
 
 function normalizeMimeType(contentType) {
