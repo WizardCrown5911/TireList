@@ -522,6 +522,17 @@
     0 12px 24px rgba(0, 0, 0, 0.24);
 }
 
+.ghost-button-danger {
+  border-color: rgba(255, 92, 124, 0.32);
+  color: #ffb6c8;
+  background: rgba(28, 10, 17, 0.92);
+}
+
+.ghost-button-danger:hover {
+  border-color: rgba(255, 120, 146, 0.48);
+  box-shadow: 0 12px 24px rgba(24, 4, 10, 0.28);
+}
+
 .board-surface {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);

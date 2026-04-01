@@ -676,6 +676,31 @@ function App() {
     setNotice({ message: 'Moved every card back to the pool.', tone: 'info' })
   }
 
+  function clearAll() {
+    const nextState = createBaseState()
+    localStorage.removeItem(STORAGE_KEY)
+    setTitle(nextState.title)
+    setListContext(nextState.listContext)
+    setCompactMode(nextState.compactMode)
+    setProviderSelection(filterProviderSelection(nextState.providerSelection, providerAvailability))
+    setTiers(nextState.tiers)
+    itemsRef.current = nextState.itemsById
+    setItemsById(nextState.itemsById)
+    boardStateRef.current = nextState.board
+    setBoard(nextState.board)
+    setImportText('')
+    setActiveId(null)
+    setMenuOpenId(null)
+    setProviderMenuOpen(false)
+    pendingUploadItemIdRef.current = null
+    closeImagePicker()
+    storageWarningShownRef.current = false
+    setNotice({
+      message: 'Cleared the entire tier list and restored the default board.',
+      tone: 'success',
+    })
+  }
+
   function addTier() {
     const id = createId('tier')
     const nextTier: TierConfig = { color: '#2f6bff', id, label: `Tier ${tiers.length + 1}` }
@@ -790,7 +815,7 @@ function App() {
         <input accept=".json,application/json" className="visually-hidden" onChange={(event) => { void importListFile(event.currentTarget.files?.[0] || null); event.currentTarget.value = '' }} ref={importFileRef} type="file" />
         <input accept="image/png,image/jpeg,image/webp,image/gif,image/avif" className="visually-hidden" onChange={(event) => { void handleImageUploadSelection(event.currentTarget.files?.[0] || null); event.currentTarget.value = '' }} ref={imageUploadRef} type="file" />
         <aside className="controls">
-          <Panel title="List Setup" action={<button className="ghost-button" onClick={clearPlacements} type="button">Reset placements</button>}>
+          <Panel title="List Setup" action={<div className="button-row"><button className="ghost-button" onClick={clearPlacements} type="button">Reset placements</button><button className="ghost-button ghost-button-danger" onClick={clearAll} type="button">Clear all</button></div>}>
             <label className="field"><span>List title</span><input onChange={(event) => setTitle(event.target.value)} placeholder="Best platformers ever made" type="text" value={title} /></label>
             <label className="field"><span>Context for image matching</span><textarea onChange={(event) => setListContext(event.target.value)} placeholder="Nintendo characters, pizza toppings, horror films, wrestling themes..." rows={4} value={listContext} /></label>
           </Panel>
