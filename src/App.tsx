@@ -1,7 +1,6 @@
 import {
   type CSSProperties,
   type ReactNode,
-  startTransition,
   useEffect,
   useRef,
   useState,
@@ -112,6 +111,7 @@ function App() {
   const [lookupMode, setLookupMode] = useState('Local CLIP')
   const [providerAvailability, setProviderAvailability] = useState({ gemini: false, google: false, groq: false, local: true })
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [autoPickingItems, setAutoPickingItems] = useState(false)
   const [bulkRunning, setBulkRunning] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [providerMenuOpen, setProviderMenuOpen] = useState(false)
@@ -529,6 +529,38 @@ function App() {
     setNotice({ message: 'Image matching finished across the active matcher stack.', tone: 'success' })
   }
 
+  async function autoLookupNewItems(itemIds: string[]) {
+    if (!itemIds.length || backendReady === false) {
+      return
+    }
+
+    setAutoPickingItems(true)
+    let cursor = 0
+    let matched = 0
+    let failed = 0
+    const concurrency = Math.min(3, itemIds.length)
+
+    try {
+      async function worker() {
+        while (cursor < itemIds.length) {
+          const itemId = itemIds[cursor]
+          cursor += 1
+          const ok = await lookupImageForItem(itemId, true)
+          if (ok) matched += 1
+          else failed += 1
+        }
+      }
+
+      await Promise.all(Array.from({ length: concurrency }, () => worker()))
+      setNotice({
+        message: failed ? `Added ${itemIds.length} items. Auto-picked ${matched} image${matched === 1 ? '' : 's'} and left ${failed} for manual review.` : `Added ${itemIds.length} item${itemIds.length === 1 ? '' : 's'} and auto-picked image${itemIds.length === 1 ? '' : 's'}.`,
+        tone: failed ? 'warning' : 'success',
+      })
+    } finally {
+      setAutoPickingItems(false)
+    }
+  }
+
   async function exportBoard() {
     if (!boardRef.current) return
     try {
@@ -549,16 +581,34 @@ function App() {
       setNotice({ message: 'Nothing to add. Paste one item per line.', tone: 'warning' })
       return
     }
-    startTransition(() => {
-      const nextEntries = parsedItems.map((entry) => {
-        const id = createId('item')
-        return [id, { context: entry.context, id, imageStatus: 'idle' as const, name: entry.name, tierId: null }] as const
-      })
-      setItemsById((current) => ({ ...current, ...Object.fromEntries(nextEntries) }))
-      updateBoard((current) => ({ ...current, [POOL_ID]: [...getContainerItems(current, POOL_ID), ...nextEntries.map(([id]) => id)] }))
-      setImportText('')
-      setNotice({ message: `Added ${nextEntries.length} item${nextEntries.length === 1 ? '' : 's'} to the board.`, tone: 'success' })
+    const nextEntries = parsedItems.map((entry) => {
+      const id = createId('item')
+      return [id, { context: entry.context, id, imageStatus: 'idle' as const, name: entry.name, tierId: null }] as const
     })
+    const nextItems = Object.fromEntries(nextEntries)
+    const nextIds = nextEntries.map(([id]) => id)
+
+    setItemsById((current) => {
+      const merged = { ...current, ...nextItems }
+      itemsRef.current = merged
+      return merged
+    })
+    updateBoard((current) => ({ ...current, [POOL_ID]: [...getContainerItems(current, POOL_ID), ...nextIds] }))
+    setImportText('')
+
+    if (backendReady === false) {
+      setNotice({
+        message: `Added ${nextIds.length} item${nextIds.length === 1 ? '' : 's'} to the board. The backend is offline, so images were not auto-picked.`,
+        tone: 'warning',
+      })
+      return
+    }
+
+    setNotice({
+      message: `Added ${nextIds.length} item${nextIds.length === 1 ? '' : 's'} to the board. Auto-picking images now...`,
+      tone: 'info',
+    })
+    void autoLookupNewItems(nextIds)
   }
 
   function clearPlacements() {
@@ -689,7 +739,7 @@ function App() {
           </Panel>
           <Panel title="Items" action={<button className="accent-button" onClick={addItemsFromImport} type="button">Add items</button>}>
             <label className="field"><span>One per line. Use `name | context` for ambiguous entries.</span><textarea onChange={(event) => setImportText(event.target.value)} placeholder={IMPORT_PLACEHOLDER} rows={8} value={importText} /></label>
-            <div className="button-row"><button className="accent-button" disabled={bulkRunning || !Object.keys(itemsById).length} onClick={() => { void lookupAllImages() }} type="button">{bulkRunning ? 'Matching images...' : 'Find images for all'}</button></div>
+            <div className="button-row"><button className="accent-button" disabled={bulkRunning || autoPickingItems || !Object.keys(itemsById).length} onClick={() => { void lookupAllImages() }} type="button">{bulkRunning || autoPickingItems ? 'Matching images...' : 'Find images for all'}</button></div>
           </Panel>
           <Panel title="Tiers" action={<button className="ghost-button" onClick={addTier} type="button">Add tier</button>}>
             <div className="tier-edit-list">
