@@ -10,6 +10,7 @@ import {
   chooseCandidateWithLocalAi,
   LocalImageRanker,
 } from './local-image-ranker.js'
+import { suggestRelatedItems } from './related-item-suggester.js'
 
 const PORT = Number(process.env.PORT || 3001)
 const USER_AGENT = 'ForgeTierlistBuilder/1.0'
@@ -49,6 +50,35 @@ app.get('/api/health', (_request, response) => {
     },
     ranker: rankerStatus,
   })
+})
+
+app.post('/api/items/suggest', async (request, response) => {
+  const title = ensureString(request.body?.title)
+  const listContext = ensureString(request.body?.listContext)
+  const limit = Number(request.body?.limit || 18)
+
+  if (!title) {
+    response.status(400).json({ error: 'title is required.' })
+    return
+  }
+
+  try {
+    const items = await suggestRelatedItems({
+      limit,
+      listContext,
+      title,
+    })
+
+    response.json({
+      items,
+      title,
+    })
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Item suggestion failed.'
+
+    response.status(500).json({ error: message })
+  }
 })
 
 app.post('/api/images/lookup', async (request, response) => {

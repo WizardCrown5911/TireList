@@ -47,8 +47,10 @@ type ProviderSelection = { rankers: RankerProvider[]; sources: SourceProvider[] 
 type SavedState = { board: BoardState; compactMode: boolean; itemsById: Record<string, TierItem>; listContext: string; providerSelection: ProviderSelection; title: string; tiers: TierConfig[] }
 type HealthResponse = { mode: string; ok: boolean; providers?: { gemini: { configured: boolean; model: string }; google: { configured: boolean }; groq: { configured: boolean; model: string }; local: { configured: boolean; model: string } }; ranker?: { available?: boolean; error: string | null; model: string; ready: boolean; state: string } }
 type LookupResponse = { candidates?: ImageResult[]; query: string; result: ImageResult }
+type SuggestItemsResponse = { items: Array<{ context: string; name: string }>; title: string }
 type Notice = { message: string; tone: NoticeTone }
 type PickerState = { candidates: ImageResult[]; error: string; itemId: string | null; loading: boolean; query: string; recommendedId: string | null }
+type SuggestedItem = { context: string; id: string; name: string }
 type LaneProps = {
   color: string
   emptyMessage: string
@@ -89,11 +91,6 @@ const DEFAULT_PROVIDER_SELECTION: ProviderSelection = {
   rankers: [...RANKER_PROVIDER_ORDER],
   sources: [...SOURCE_PROVIDER_ORDER],
 }
-const IMPORT_PLACEHOLDER = `Princess Peach
-Bowser
-Mario | Nintendo mascot
-Luigi
-Toad`
 
 function App() {
   const [initialState] = useState<SavedState>(() => loadSavedState())
@@ -104,9 +101,12 @@ function App() {
   const [tiers, setTiers] = useState<TierConfig[]>(initialState.tiers)
   const [itemsById, setItemsById] = useState<Record<string, TierItem>>(initialState.itemsById)
   const [board, setBoard] = useState<BoardState>(initialState.board)
-  const [importText, setImportText] = useState('')
+  const [titleSuggestions, setTitleSuggestions] = useState<SuggestedItem[]>([])
+  const [selectedSuggestionIds, setSelectedSuggestionIds] = useState<string[]>([])
+  const [findingSuggestions, setFindingSuggestions] = useState(false)
+  const [suggestionError, setSuggestionError] = useState('')
   const [notice, setNotice] = useState<Notice>({
-    message: 'Paste items, add context if names are ambiguous, then let the matcher search public sources and rerank hard cases.',
+    message: 'Set a list title, generate related items, then add selected ones to the pool and let the matcher pick images.',
     tone: 'info',
   })
   const [backendReady, setBackendReady] = useState<boolean | null>(null)
@@ -238,6 +238,9 @@ function App() {
   const poolItems = mapIdsToItems(board[POOL_ID] || [], itemsById)
   const activeItem = activeId ? itemsById[activeId] : null
   const pickerItem = pickerState.itemId ? itemsById[pickerState.itemId] : null
+  const existingItemKeys = new Set(Object.values(itemsById).map((item) => itemKeyFor(item.name, item.context)))
+  const addableSuggestionCount = titleSuggestions.filter((item) => !existingItemKeys.has(itemKeyFor(item.name, item.context))).length
+  const selectedAddableSuggestionCount = titleSuggestions.filter((item) => selectedSuggestionIds.includes(item.id) && !existingItemKeys.has(itemKeyFor(item.name, item.context))).length
 
   function updateBoard(updater: (current: BoardState) => BoardState) {
     setBoard((current) => {
@@ -314,6 +317,9 @@ function App() {
       setBoard(nextState.board)
       setMenuOpenId(null)
       setProviderMenuOpen(false)
+      setTitleSuggestions([])
+      setSelectedSuggestionIds([])
+      setSuggestionError('')
       closeImagePicker()
       setNotice({
         message: `Imported "${nextState.title}" with ${Object.keys(nextState.itemsById).length} items.`,
@@ -325,6 +331,158 @@ function App() {
         tone: 'error',
       })
     }
+  }
+
+  async function findRelatedItemsFromTitle() {
+    const trimmedTitle = title.trim()
+
+    if (!trimmedTitle) {
+      setNotice({
+        message: 'Give the tier list a title first so the item finder knows what to generate.',
+        tone: 'warning',
+      })
+      return
+    }
+
+    if (!providerAvailability.gemini && !providerAvailability.groq) {
+      setNotice({
+        message: 'Related item generation needs Gemini or Groq configured on the server.',
+        tone: 'warning',
+      })
+      return
+    }
+
+    setFindingSuggestions(true)
+    setSuggestionError('')
+
+    try {
+      const response = await fetch('/api/items/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          listContext,
+          limit: 18,
+          title: trimmedTitle,
+        }),
+      })
+      const payload = (await response.json()) as SuggestItemsResponse | { error?: string }
+      const errorMessage = 'error' in payload ? payload.error : undefined
+
+      if (!response.ok || !('items' in payload)) {
+        throw new Error(errorMessage || `Unable to generate related items for ${trimmedTitle}.`)
+      }
+
+      const suggestions = dedupeSuggestionItems(payload.items).map((item) => ({
+        ...item,
+        id: createId('suggestion'),
+      }))
+
+      setTitleSuggestions(suggestions)
+      setSelectedSuggestionIds(suggestions.map((item) => item.id))
+      setNotice({
+        message: `Found ${suggestions.length} related item${suggestions.length === 1 ? '' : 's'} for "${trimmedTitle}". Pick what to add to the pool.`,
+        tone: 'success',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Unable to generate related items for ${trimmedTitle}.`
+      setTitleSuggestions([])
+      setSelectedSuggestionIds([])
+      setSuggestionError(message)
+      setNotice({ message, tone: 'error' })
+    } finally {
+      setFindingSuggestions(false)
+    }
+  }
+
+  function toggleSuggestionSelection(suggestionId: string) {
+    setSelectedSuggestionIds((current) =>
+      current.includes(suggestionId)
+        ? current.filter((id) => id !== suggestionId)
+        : [...current, suggestionId],
+    )
+  }
+
+  function selectAllSuggestions() {
+    setSelectedSuggestionIds(
+      titleSuggestions
+        .filter((item) => !existingItemKeys.has(itemKeyFor(item.name, item.context)))
+        .map((item) => item.id),
+    )
+  }
+
+  function clearSuggestionSelection() {
+    setSelectedSuggestionIds([])
+  }
+
+  function addEntriesToPool(entries: Array<{ context: string; name: string }>, sourceLabel: string) {
+    const seen = new Set(Object.values(itemsRef.current).map((item) => itemKeyFor(item.name, item.context)))
+    const uniqueEntries = entries.filter((entry) => {
+      const name = entry.name.trim()
+      const context = entry.context.trim()
+      const key = itemKeyFor(name, context)
+
+      if (!name || seen.has(key)) {
+        return false
+      }
+
+      seen.add(key)
+      return true
+    })
+
+    if (!uniqueEntries.length) {
+      setNotice({
+        message: 'Those suggested items are already on the board.',
+        tone: 'warning',
+      })
+      return
+    }
+
+    const nextEntries = uniqueEntries.map((entry) => {
+      const id = createId('item')
+      return [id, { context: entry.context.trim(), id, imageStatus: 'idle' as const, name: entry.name.trim(), tierId: null }] as const
+    })
+    const nextItems = Object.fromEntries(nextEntries)
+    const nextIds = nextEntries.map(([id]) => id)
+
+    setItemsById((current) => {
+      const merged = { ...current, ...nextItems }
+      itemsRef.current = merged
+      return merged
+    })
+    updateBoard((current) => ({ ...current, [POOL_ID]: [...getContainerItems(current, POOL_ID), ...nextIds] }))
+
+    if (backendReady === false) {
+      setNotice({
+        message: `Added ${nextIds.length} ${sourceLabel} to the pool. The backend is offline, so images were not auto-picked.`,
+        tone: 'warning',
+      })
+      return
+    }
+
+    setNotice({
+      message: `Added ${nextIds.length} ${sourceLabel} to the pool. Auto-picking images now...`,
+      tone: 'info',
+    })
+    void autoLookupNewItems(nextIds)
+  }
+
+  function addSuggestedItems(mode: 'all' | 'selected') {
+    const selectedIds = new Set(mode === 'all' ? titleSuggestions.map((item) => item.id) : selectedSuggestionIds)
+    const entries = titleSuggestions
+      .filter((item) => selectedIds.has(item.id))
+      .filter((item) => !existingItemKeys.has(itemKeyFor(item.name, item.context)))
+      .map((item) => ({ context: item.context, name: item.name }))
+
+    if (!entries.length) {
+      setNotice({
+        message: mode === 'all' ? 'There are no new suggested items left to add.' : 'Pick at least one suggested item first.',
+        tone: 'warning',
+      })
+      return
+    }
+
+    addEntriesToPool(entries, mode === 'all' ? 'suggested items' : 'selected items')
+    setSelectedSuggestionIds((current) => current.filter((id) => !selectedIds.has(id)))
   }
 
   async function fetchLookupPayload(itemId: string) {
@@ -631,42 +789,6 @@ function App() {
     }
   }
 
-  function addItemsFromImport() {
-    const parsedItems = parseImportText(importText)
-    if (!parsedItems.length) {
-      setNotice({ message: 'Nothing to add. Paste one item per line.', tone: 'warning' })
-      return
-    }
-    const nextEntries = parsedItems.map((entry) => {
-      const id = createId('item')
-      return [id, { context: entry.context, id, imageStatus: 'idle' as const, name: entry.name, tierId: null }] as const
-    })
-    const nextItems = Object.fromEntries(nextEntries)
-    const nextIds = nextEntries.map(([id]) => id)
-
-    setItemsById((current) => {
-      const merged = { ...current, ...nextItems }
-      itemsRef.current = merged
-      return merged
-    })
-    updateBoard((current) => ({ ...current, [POOL_ID]: [...getContainerItems(current, POOL_ID), ...nextIds] }))
-    setImportText('')
-
-    if (backendReady === false) {
-      setNotice({
-        message: `Added ${nextIds.length} item${nextIds.length === 1 ? '' : 's'} to the board. The backend is offline, so images were not auto-picked.`,
-        tone: 'warning',
-      })
-      return
-    }
-
-    setNotice({
-      message: `Added ${nextIds.length} item${nextIds.length === 1 ? '' : 's'} to the board. Auto-picking images now...`,
-      tone: 'info',
-    })
-    void autoLookupNewItems(nextIds)
-  }
-
   function clearPlacements() {
     const allIds = Object.keys(itemsRef.current)
     const nextBoard = { ...createBoard(tiers), [POOL_ID]: allIds }
@@ -688,10 +810,12 @@ function App() {
     setItemsById(nextState.itemsById)
     boardStateRef.current = nextState.board
     setBoard(nextState.board)
-    setImportText('')
     setActiveId(null)
     setMenuOpenId(null)
     setProviderMenuOpen(false)
+    setTitleSuggestions([])
+    setSelectedSuggestionIds([])
+    setSuggestionError('')
     pendingUploadItemIdRef.current = null
     closeImagePicker()
     storageWarningShownRef.current = false
@@ -819,8 +943,37 @@ function App() {
             <label className="field"><span>List title</span><input onChange={(event) => setTitle(event.target.value)} placeholder="Best platformers ever made" type="text" value={title} /></label>
             <label className="field"><span>Context for image matching</span><textarea onChange={(event) => setListContext(event.target.value)} placeholder="Nintendo characters, pizza toppings, horror films, wrestling themes..." rows={4} value={listContext} /></label>
           </Panel>
-          <Panel title="Items" action={<button className="accent-button" onClick={addItemsFromImport} type="button">Add items</button>}>
-            <label className="field"><span>One per line. Use `name | context` for ambiguous entries.</span><textarea onChange={(event) => setImportText(event.target.value)} placeholder={IMPORT_PLACEHOLDER} rows={8} value={importText} /></label>
+          <Panel title="Item Finder" action={<button className="accent-button" disabled={findingSuggestions || !title.trim()} onClick={() => { void findRelatedItemsFromTitle() }} type="button">{findingSuggestions ? 'Finding items...' : 'Find from title'}</button>}>
+            <p className="finder-copy">Use the list title and optional context to generate related items, then add the selected ones or the whole batch to the pool.</p>
+            {titleSuggestions.length ? (
+              <>
+                <div className="finder-toolbar">
+                  <span className="finder-summary">{titleSuggestions.length} suggestions found, {addableSuggestionCount} still addable.</span>
+                  <div className="button-row">
+                    <button className="ghost-button" disabled={!addableSuggestionCount} onClick={selectAllSuggestions} type="button">Select all</button>
+                    <button className="ghost-button" disabled={!selectedSuggestionIds.length} onClick={clearSuggestionSelection} type="button">Clear selection</button>
+                    <button className="ghost-button" disabled={!selectedAddableSuggestionCount} onClick={() => addSuggestedItems('selected')} type="button">Add selected</button>
+                    <button className="accent-button" disabled={!addableSuggestionCount} onClick={() => addSuggestedItems('all')} type="button">Add all</button>
+                  </div>
+                </div>
+                <div className="finder-grid">
+                  {titleSuggestions.map((suggestion) => {
+                    const alreadyAdded = existingItemKeys.has(itemKeyFor(suggestion.name, suggestion.context))
+                    const selected = selectedSuggestionIds.includes(suggestion.id)
+
+                    return (
+                      <button className={`finder-card ${selected ? 'finder-card-selected' : ''} ${alreadyAdded ? 'finder-card-disabled' : ''}`} disabled={alreadyAdded} key={suggestion.id} onClick={() => toggleSuggestionSelection(suggestion.id)} type="button">
+                        <span className={`finder-card-flag ${alreadyAdded ? 'finder-card-flag-muted' : selected ? 'finder-card-flag-active' : ''}`}>{alreadyAdded ? 'In pool' : selected ? 'Selected' : 'Pick'}</span>
+                        <strong>{suggestion.name}</strong>
+                        {suggestion.context ? <span>{suggestion.context}</span> : <span>Uses the list title as context.</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className={`finder-state ${suggestionError ? 'finder-state-error' : ''}`}>{suggestionError || 'Set a title, then generate a batch of related items to review before adding them.'}</div>
+            )}
             <div className="button-row"><button className="accent-button" disabled={bulkRunning || autoPickingItems || !Object.keys(itemsById).length} onClick={() => { void lookupAllImages() }} type="button">{bulkRunning || autoPickingItems ? 'Matching images...' : 'Find images for all'}</button></div>
           </Panel>
           <Panel title="Tiers" action={<button className="ghost-button" onClick={addTier} type="button">Add tier</button>}>
@@ -1167,20 +1320,6 @@ function normalizeBoard(board: BoardState, tiers: TierConfig[], itemsById: Recor
   return next
 }
 
-function parseImportText(value: string) {
-  const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-  const seen = new Set<string>()
-  return lines.flatMap((line) => {
-    const [namePart, ...contextParts] = line.split('|')
-    const name = namePart.trim()
-    const context = contextParts.join('|').trim()
-    const key = `${name.toLowerCase()}|${context.toLowerCase()}`
-    if (!name || seen.has(key)) return []
-    seen.add(key)
-    return [{ context, name }]
-  })
-}
-
 function mapIdsToItems(ids: string[], itemsById: Record<string, TierItem>) { return ids.flatMap((id) => (itemsById[id] ? [itemsById[id]] : [])) }
 function createId(prefix: string) { return `${prefix}-${globalThis.crypto.randomUUID()}` }
 function removeItemFromBoard(board: BoardState, itemId: string) { return Object.fromEntries(Object.entries(board).map(([containerId, itemIds]) => [containerId, itemIds.filter((currentId) => currentId !== itemId)])) }
@@ -1200,6 +1339,22 @@ function moveItemToContainer(board: BoardState, itemId: string, fromContainer: s
 function initialsFor(value: string) { return value.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') }
 function slugify(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') }
 function hasSourceLink(image: ImageResult) { return Boolean(image.sourceUrl) && !image.sourceUrl.startsWith('data:') }
+function itemKeyFor(name: string, context: string) { return `${name.trim().toLowerCase()}|${context.trim().toLowerCase()}` }
+function dedupeSuggestionItems(items: Array<{ context: string; name: string }>) {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const name = item.name.trim()
+    const context = item.context.trim()
+    const key = itemKeyFor(name, context)
+
+    if (!name || seen.has(key)) {
+      return false
+    }
+
+    seen.add(key)
+    return true
+  }).map((item) => ({ context: item.context.trim(), name: item.name.trim() }))
+}
 function matchMethodLabel(method: MatchMethod) { switch (method) { case 'local-ai': return 'local AI scoring'; case 'gemini': return 'Gemini fallback'; case 'groq': return 'Groq fallback'; default: return 'heuristic fallback' } }
 function matchMethodShortLabel(method: MatchMethod) { switch (method) { case 'local-ai': return 'Local AI'; case 'gemini': return 'Gemini'; case 'groq': return 'Groq'; case 'manual': return 'Manual'; default: return 'Heuristic' } }
 function matchSummary(image: ImageResult) { return image.matchMethod === 'manual' ? 'Manual pick' : `${matchMethodShortLabel(image.matchMethod)} / ${Math.round(image.confidence * 100)}%` }

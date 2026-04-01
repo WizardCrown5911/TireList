@@ -249,6 +249,122 @@
     0 0 24px rgba(47, 107, 255, 0.14);
 }
 
+.finder-copy {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.finder-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.finder-summary {
+  color: #dbe8ff;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.finder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.finder-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 134px;
+  padding: 14px;
+  border: 1px solid rgba(82, 108, 168, 0.24);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(10, 17, 36, 0.96), rgba(6, 12, 25, 0.96));
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    opacity 160ms ease;
+}
+
+.finder-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(121, 153, 229, 0.44);
+  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.24);
+}
+
+.finder-card strong {
+  color: var(--text);
+  font-size: 0.94rem;
+  line-height: 1.35;
+}
+
+.finder-card span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.finder-card-selected {
+  border-color: rgba(80, 146, 255, 0.56);
+  box-shadow:
+    inset 0 0 0 1px rgba(80, 146, 255, 0.28),
+    0 18px 30px rgba(0, 0, 0, 0.24);
+}
+
+.finder-card-disabled {
+  opacity: 0.52;
+  cursor: default;
+}
+
+.finder-card-flag {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(28, 39, 66, 0.94);
+  color: #b8d1ff;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.finder-card-flag-active {
+  background: rgba(22, 72, 160, 0.94);
+  color: white;
+}
+
+.finder-card-flag-muted {
+  background: rgba(70, 76, 88, 0.94);
+  color: #f4f7fb;
+}
+
+.finder-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 132px;
+  padding: 18px;
+  border: 1px dashed rgba(96, 122, 188, 0.26);
+  border-radius: 20px;
+  color: var(--muted);
+  background: rgba(5, 10, 22, 0.74);
+  text-align: center;
+}
+
+.finder-state-error {
+  color: #ffb1c0;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
