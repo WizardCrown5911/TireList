@@ -1,5 +1,7 @@
 # Forge Tierlist
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/WizardCrown5911/TireList)
+
 A full-stack tier-list builder with:
 
 - drag-and-drop ranking lanes
