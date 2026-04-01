@@ -55,6 +55,7 @@ type CountLabel = { plural: string; singular: string }
 type LaneProps = {
   color: string
   emptyMessage: string
+  header: ReactNode
   id: string
   isPool?: boolean
   items: TierItem[]
@@ -66,7 +67,6 @@ type LaneProps = {
   onRemove: (itemId: string) => void
   onToggleMenu: (itemId: string) => void
   onUpload: (itemId: string) => void
-  title: string
 }
 type CardShellProps = {
   item: TierItem
@@ -122,6 +122,8 @@ function App() {
   const [lookupMode, setLookupMode] = useState('Local CLIP')
   const [providerAvailability, setProviderAvailability] = useState({ gemini: false, google: false, groq: false, local: true })
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [draggingTierId, setDraggingTierId] = useState<string | null>(null)
+  const [tierDropTargetId, setTierDropTargetId] = useState<string | null>(null)
   const [autoPickingItems, setAutoPickingItems] = useState(false)
   const [bulkRunning, setBulkRunning] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
@@ -935,6 +937,7 @@ function App() {
     boardStateRef.current = nextState.board
     setBoard(nextState.board)
     setActiveId(null)
+    resetTierDragState()
     setMenuOpenId(null)
     setProviderMenuOpen(false)
     setTitleSuggestions([])
@@ -961,6 +964,57 @@ function App() {
     setTiers((current) => current.map((tier) => (tier.id === tierId ? { ...tier, [field]: value } : tier)))
   }
 
+  function resetTierDragState() {
+    setDraggingTierId(null)
+    setTierDropTargetId(null)
+  }
+
+  function handleTierHeaderDragStart(event: React.DragEvent<HTMLElement>, tierId: string) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', tierId)
+    setMenuOpenId(null)
+    setDraggingTierId(tierId)
+    setTierDropTargetId(tierId)
+  }
+
+  function handleTierHeaderDragOver(event: React.DragEvent<HTMLElement>, tierId: string) {
+    if (!draggingTierId) {
+      return
+    }
+
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+
+    if (tierDropTargetId !== tierId) {
+      setTierDropTargetId(tierId)
+    }
+  }
+
+  function handleTierHeaderDrop(event: React.DragEvent<HTMLElement>, targetTierId: string) {
+    if (!draggingTierId) {
+      return
+    }
+
+    event.preventDefault()
+
+    if (draggingTierId === targetTierId) {
+      resetTierDragState()
+      return
+    }
+
+    setTiers((current) => {
+      const activeIndex = current.findIndex((tier) => tier.id === draggingTierId)
+      const targetIndex = current.findIndex((tier) => tier.id === targetTierId)
+
+      if (activeIndex === -1 || targetIndex === -1) {
+        return current
+      }
+
+      return arrayMove(current, activeIndex, targetIndex)
+    })
+    resetTierDragState()
+  }
+
   function removeTier(tierId: string) {
     const idsToMove = getContainerItems(boardStateRef.current, tierId)
     const nextTiers = tiers.filter((tier) => tier.id !== tierId)
@@ -975,6 +1029,10 @@ function App() {
       return nextBoard
     })
     setItemsById((current) => Object.fromEntries(Object.entries(current).map(([id, item]) => [id, { ...item, tierId: item.tierId === tierId ? null : item.tierId }])))
+
+    if (draggingTierId === tierId || tierDropTargetId === tierId) {
+      resetTierDragState()
+    }
   }
 
   function removeItem(itemId: string) {
@@ -1115,23 +1173,12 @@ function App() {
             )}
             <div className="button-row"><button className="accent-button" disabled={bulkRunning || autoPickingItems || !Object.keys(itemsById).length} onClick={() => { void lookupAllImages() }} type="button">{bulkRunning || autoPickingItems ? 'Matching images...' : 'Find images for all'}</button></div>
           </Panel>
-          <Panel title="Tiers" action={<button className="ghost-button" onClick={addTier} type="button">Add tier</button>}>
-            <div className="tier-edit-list">
-              {tiers.map((tier) => (
-                <div className="tier-edit-row" key={tier.id}>
-                  <input aria-label={`${tier.label} color`} className="color-picker" onChange={(event) => updateTier(tier.id, 'color', event.target.value)} type="color" value={tier.color} />
-                  <input aria-label={`${tier.label} label`} onChange={(event) => updateTier(tier.id, 'label', event.target.value)} type="text" value={tier.label} />
-                  <button aria-label={`Remove ${tier.label}`} className="icon-button" disabled={tiers.length <= 1} onClick={() => removeTier(tier.id)} type="button">x</button>
-                </div>
-              ))}
-            </div>
-          </Panel>
           <div className={`notice notice-${notice.tone}`}><strong>{backendReady === false ? 'Backend offline.' : 'Status.'}</strong><span>{notice.message}</span></div>
           <div className="meta-card"><p>Current image APIs: {selectionSummary(providerSelection)}.</p><p>Choose sources and AI rerankers from the `Image APIs` dropdown. With no AI rankers selected, the app falls back to metadata-only matching.</p></div>
         </aside>
         <section className="board-column">
           <div className="board-toolbar">
-            <div><span className="board-title">{title || 'Untitled tier list'}</span><p className="board-subtitle">Drag cards between the pool and each lane. Use the 3-dot menu to auto-pick, upload, browse image options, or remove a card.</p></div>
+            <div><span className="board-title">{title || 'Untitled tier list'}</span><p className="board-subtitle">Drag cards between the pool and each lane. Edit tier names and colors in the lane headers, then use the drag handle there to reorder tiers.</p></div>
             <div className="toolbar-actions">
               <div className="toolbar-menu-shell" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
                 <button className={`ghost-button ${providerMenuOpen ? 'ghost-button-active' : ''}`} onClick={() => setProviderMenuOpen((current) => !current)} onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }} type="button">Image APIs</button>
@@ -1186,11 +1233,12 @@ function App() {
             <DndContext collisionDetection={collisionDetectionStrategy} onDragCancel={handleDragCancel} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragStart={handleDragStart} sensors={sensors}>
               <div className="board-shell">
                 {tiers.map((tier) => (
-                  <TierLane color={tier.color} emptyMessage={`Drop cards into ${tier.label}.`} id={tier.id} items={mapIdsToItems(board[tier.id] || [], itemsById)} key={tier.id} menuOpenId={menuOpenId} onDropImage={handleImageDrop} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} title={tier.label} />
+                  <TierLane color={tier.color} emptyMessage={`Drop cards into ${tier.label}.`} header={<TierEditorHeader count={getContainerItems(board, tier.id).length} dropTarget={Boolean(draggingTierId) && tierDropTargetId === tier.id && draggingTierId !== tier.id} onColorChange={(value) => updateTier(tier.id, 'color', value)} onDragEnd={resetTierDragState} onDragOver={(event) => handleTierHeaderDragOver(event, tier.id)} onDragStart={(event) => handleTierHeaderDragStart(event, tier.id)} onDrop={(event) => handleTierHeaderDrop(event, tier.id)} onLabelChange={(value) => updateTier(tier.id, 'label', value)} onRemove={() => removeTier(tier.id)} removable={tiers.length > 1} tier={tier} dragging={draggingTierId === tier.id} />} id={tier.id} items={mapIdsToItems(board[tier.id] || [], itemsById)} key={tier.id} menuOpenId={menuOpenId} onDropImage={handleImageDrop} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} />
                 ))}
+                <button className="lane-add-button" onClick={addTier} type="button">Add tier underneath</button>
               </div>
               <div className="pool-island-wrap">
-                <TierLane color="#7a808e" emptyMessage="Drop cards here or drop image files to create new items." id={POOL_ID} isPool items={poolItems} menuOpenId={menuOpenId} onDropFiles={(files) => { void addDroppedImagesToPool(files) }} onDropImage={handleImageDrop} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} title="Pool" />
+                <TierLane color="#7a808e" emptyMessage="Drop cards here or drop image files to create new items." header={<div className="lane-label-basic"><span className="lane-label-title">Pool</span><strong className="lane-label-count">{poolItems.length}</strong></div>} id={POOL_ID} isPool items={poolItems} menuOpenId={menuOpenId} onDropFiles={(files) => { void addDroppedImagesToPool(files) }} onDropImage={handleImageDrop} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} />
               </div>
               <DragOverlay>{activeItem ? <CardShell item={activeItem} overlay /> : null}</DragOverlay>
             </DndContext>
@@ -1210,7 +1258,23 @@ function Stat({ label, value }: { label: string; value: string }) {
   return <div className="stat-card"><span>{label}</span><strong>{value}</strong></div>
 }
 
-function TierLane({ color, emptyMessage, id, isPool = false, items, menuOpenId, onDropFiles, onDropImage, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload, title }: LaneProps) {
+function TierEditorHeader({ count, dragging = false, dropTarget = false, onColorChange, onDragEnd, onDragOver, onDragStart, onDrop, onLabelChange, onRemove, removable, tier }: { count: number; dragging?: boolean; dropTarget?: boolean; onColorChange: (value: string) => void; onDragEnd: () => void; onDragOver: (event: React.DragEvent<HTMLElement>) => void; onDragStart: (event: React.DragEvent<HTMLElement>) => void; onDrop: (event: React.DragEvent<HTMLElement>) => void; onLabelChange: (value: string) => void; onRemove: () => void; removable: boolean; tier: TierConfig }) {
+  return (
+    <div className={`tier-lane-header ${dragging ? 'tier-lane-header-dragging' : ''} ${dropTarget ? 'tier-lane-header-target' : ''}`} onDragOver={onDragOver} onDrop={onDrop}>
+      <div className="tier-lane-top">
+        <div aria-label={`Reorder ${tier.label}`} className="tier-drag-handle" draggable onDragEnd={onDragEnd} onDragStart={onDragStart} role="button" tabIndex={0}>::</div>
+        <strong className="tier-count-chip">{count}</strong>
+      </div>
+      <input aria-label={`${tier.label} label`} className="tier-label-input" onChange={(event) => onLabelChange(event.target.value)} type="text" value={tier.label} />
+      <div className="tier-lane-tools">
+        <input aria-label={`${tier.label} color`} className="color-picker tier-color-picker" onChange={(event) => onColorChange(event.target.value)} type="color" value={tier.color} />
+        <button aria-label={`Remove ${tier.label}`} className="icon-button tier-remove-button" disabled={!removable} onClick={onRemove} type="button">x</button>
+      </div>
+    </div>
+  )
+}
+
+function TierLane({ color, emptyMessage, header, id, isPool = false, items, menuOpenId, onDropFiles, onDropImage, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload }: LaneProps) {
   const { isOver, setNodeRef } = useDroppable({ id })
   const [isFileOver, setIsFileOver] = useState(false)
   const fileDragDepthRef = useRef(0)
@@ -1267,7 +1331,7 @@ function TierLane({ color, emptyMessage, id, isPool = false, items, menuOpenId, 
 
   return (
     <section className={`lane ${isOver ? 'lane-over' : ''} ${isPool ? 'lane-pool' : ''} ${isFileOver ? 'lane-file-over' : ''}`} onDragEnter={handleLaneDragEnter} onDragLeave={handleLaneDragLeave} onDragOver={handleLaneDragOver} onDrop={handleLaneDrop} ref={setNodeRef} style={{ '--lane-color': color } as CSSProperties}>
-      <div className="lane-label"><span>{title}</span><strong>{items.length}</strong></div>
+      <div className="lane-label">{header}</div>
       <SortableContext items={items.map((item) => item.id)} strategy={rectSortingStrategy}>
         <div className="lane-grid">
           {items.map((item) => <SortableCard item={item} key={item.id} menuOpen={menuOpenId === item.id} onDropImage={onDropImage} onLookup={onLookup} onOpenPicker={onOpenPicker} onRemove={onRemove} onToggleMenu={onToggleMenu} onUpload={onUpload} />)}
