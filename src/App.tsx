@@ -60,6 +60,7 @@ type LaneProps = {
   onOpenPicker: (itemId: string) => void
   onRemove: (itemId: string) => void
   onToggleMenu: (itemId: string) => void
+  onUpload: (itemId: string) => void
   title: string
 }
 type CardShellProps = {
@@ -69,6 +70,7 @@ type CardShellProps = {
   onOpenPicker?: (itemId: string) => void
   onRemove?: (itemId: string) => void
   onToggleMenu?: (itemId: string) => void
+  onUpload?: (itemId: string) => void
   overlay?: boolean
 }
 
@@ -125,10 +127,13 @@ function App() {
   })
   const boardRef = useRef<HTMLDivElement | null>(null)
   const importFileRef = useRef<HTMLInputElement | null>(null)
+  const imageUploadRef = useRef<HTMLInputElement | null>(null)
   const boardStateRef = useRef(initialState.board)
   const itemsRef = useRef(itemsById)
   const listContextRef = useRef(listContext)
   const providerSelectionRef = useRef(initialState.providerSelection)
+  const pendingUploadItemIdRef = useRef<string | null>(null)
+  const storageWarningShownRef = useRef(false)
   const lastOverId = useRef<UniqueIdentifier | null>(null)
 
   useEffect(() => { itemsRef.current = itemsById }, [itemsById])
@@ -136,10 +141,22 @@ function App() {
   useEffect(() => { providerSelectionRef.current = providerSelection }, [providerSelection])
   useEffect(() => { boardStateRef.current = board }, [board])
   useEffect(() => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ board: normalizeBoard(board, tiers, itemsById), compactMode, itemsById, listContext, providerSelection, title, tiers } satisfies SavedState),
-    )
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ board: normalizeBoard(board, tiers, itemsById), compactMode, itemsById, listContext, providerSelection, title, tiers } satisfies SavedState),
+      )
+      storageWarningShownRef.current = false
+    } catch (error) {
+      console.error('Unable to persist tier list state.', error)
+      if (!storageWarningShownRef.current) {
+        storageWarningShownRef.current = true
+        setNotice({
+          message: 'Browser storage is full. Smaller uploads or exporting the list JSON will work better for custom images.',
+          tone: 'warning',
+        })
+      }
+    }
   }, [board, compactMode, itemsById, listContext, providerSelection, tiers, title])
 
   useEffect(() => {
@@ -252,6 +269,12 @@ function App() {
 
   function openImportDialog() {
     importFileRef.current?.click()
+  }
+
+  function openImageUploadDialog(itemId: string) {
+    pendingUploadItemIdRef.current = itemId
+    setMenuOpenId(null)
+    imageUploadRef.current?.click()
   }
 
   function downloadListFile() {
@@ -432,6 +455,39 @@ function App() {
       message: `${item.name} updated with a manual image pick from ${candidate.provider}.`,
       tone: 'success',
     })
+  }
+
+  async function handleImageUploadSelection(file: File | null) {
+    const itemId = pendingUploadItemIdRef.current
+    pendingUploadItemIdRef.current = null
+
+    if (!itemId || !file) {
+      return
+    }
+
+    const item = itemsRef.current[itemId]
+    if (!item) {
+      return
+    }
+
+    patchItem(itemId, { imageError: '', imageStatus: 'loading' })
+
+    try {
+      const previewUrl = await resizeImageFile(file)
+      patchItem(itemId, {
+        image: createCustomImageResult(item, previewUrl),
+        imageError: '',
+        imageStatus: 'ready',
+      })
+      setNotice({
+        message: `${item.name} updated with your uploaded image.`,
+        tone: 'success',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Unable to use that image for ${item.name}.`
+      patchItem(itemId, { imageError: message, imageStatus: 'error' })
+      setNotice({ message, tone: 'error' })
+    }
   }
 
   function toggleSourceProvider(provider: SourceProvider) {
@@ -732,6 +788,7 @@ function App() {
       </header>
       <main className="workspace">
         <input accept=".json,application/json" className="visually-hidden" onChange={(event) => { void importListFile(event.currentTarget.files?.[0] || null); event.currentTarget.value = '' }} ref={importFileRef} type="file" />
+        <input accept="image/png,image/jpeg,image/webp,image/gif,image/avif" className="visually-hidden" onChange={(event) => { void handleImageUploadSelection(event.currentTarget.files?.[0] || null); event.currentTarget.value = '' }} ref={imageUploadRef} type="file" />
         <aside className="controls">
           <Panel title="List Setup" action={<button className="ghost-button" onClick={clearPlacements} type="button">Reset placements</button>}>
             <label className="field"><span>List title</span><input onChange={(event) => setTitle(event.target.value)} placeholder="Best platformers ever made" type="text" value={title} /></label>
@@ -757,7 +814,7 @@ function App() {
         </aside>
         <section className="board-column">
           <div className="board-toolbar">
-            <div><span className="board-title">{title || 'Untitled tier list'}</span><p className="board-subtitle">Drag cards between the pool and each lane. Use the 3-dot menu to auto-pick, browse image options, or remove a card.</p></div>
+            <div><span className="board-title">{title || 'Untitled tier list'}</span><p className="board-subtitle">Drag cards between the pool and each lane. Use the 3-dot menu to auto-pick, upload, browse image options, or remove a card.</p></div>
             <div className="toolbar-actions">
               <div className="toolbar-menu-shell" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
                 <button className={`ghost-button ${providerMenuOpen ? 'ghost-button-active' : ''}`} onClick={() => setProviderMenuOpen((current) => !current)} onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }} type="button">Image APIs</button>
@@ -812,11 +869,11 @@ function App() {
             <DndContext collisionDetection={collisionDetectionStrategy} onDragCancel={handleDragCancel} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragStart={handleDragStart} sensors={sensors}>
               <div className="board-shell">
                 {tiers.map((tier) => (
-                  <TierLane color={tier.color} emptyMessage={`Drop cards into ${tier.label}.`} id={tier.id} items={mapIdsToItems(board[tier.id] || [], itemsById)} key={tier.id} menuOpenId={menuOpenId} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} title={tier.label} />
+                  <TierLane color={tier.color} emptyMessage={`Drop cards into ${tier.label}.`} id={tier.id} items={mapIdsToItems(board[tier.id] || [], itemsById)} key={tier.id} menuOpenId={menuOpenId} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} title={tier.label} />
                 ))}
               </div>
               <div className="pool-island-wrap">
-                <TierLane color="#7a808e" emptyMessage="Unplaced cards drift here." id={POOL_ID} isPool items={poolItems} menuOpenId={menuOpenId} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} title="Pool" />
+                <TierLane color="#7a808e" emptyMessage="Unplaced cards drift here." id={POOL_ID} isPool items={poolItems} menuOpenId={menuOpenId} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} title="Pool" />
               </div>
               <DragOverlay>{activeItem ? <CardShell item={activeItem} overlay /> : null}</DragOverlay>
             </DndContext>
@@ -836,14 +893,14 @@ function Stat({ label, value }: { label: string; value: string }) {
   return <div className="stat-card"><span>{label}</span><strong>{value}</strong></div>
 }
 
-function TierLane({ color, emptyMessage, id, isPool = false, items, menuOpenId, onLookup, onOpenPicker, onRemove, onToggleMenu, title }: LaneProps) {
+function TierLane({ color, emptyMessage, id, isPool = false, items, menuOpenId, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload, title }: LaneProps) {
   const { isOver, setNodeRef } = useDroppable({ id })
   return (
     <section className={`lane ${isOver ? 'lane-over' : ''} ${isPool ? 'lane-pool' : ''}`} ref={setNodeRef} style={{ '--lane-color': color } as CSSProperties}>
       <div className="lane-label"><span>{title}</span><strong>{items.length}</strong></div>
       <SortableContext items={items.map((item) => item.id)} strategy={rectSortingStrategy}>
         <div className="lane-grid">
-          {items.map((item) => <SortableCard item={item} key={item.id} menuOpen={menuOpenId === item.id} onLookup={onLookup} onOpenPicker={onOpenPicker} onRemove={onRemove} onToggleMenu={onToggleMenu} />)}
+          {items.map((item) => <SortableCard item={item} key={item.id} menuOpen={menuOpenId === item.id} onLookup={onLookup} onOpenPicker={onOpenPicker} onRemove={onRemove} onToggleMenu={onToggleMenu} onUpload={onUpload} />)}
           {!items.length ? <div className="lane-empty">{emptyMessage}</div> : null}
         </div>
       </SortableContext>
@@ -851,12 +908,12 @@ function TierLane({ color, emptyMessage, id, isPool = false, items, menuOpenId, 
   )
 }
 
-function SortableCard({ item, menuOpen = false, onLookup, onOpenPicker, onRemove, onToggleMenu }: { item: TierItem; menuOpen?: boolean; onLookup: (itemId: string) => void; onOpenPicker: (itemId: string) => void; onRemove: (itemId: string) => void; onToggleMenu: (itemId: string) => void }) {
+function SortableCard({ item, menuOpen = false, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload }: { item: TierItem; menuOpen?: boolean; onLookup: (itemId: string) => void; onOpenPicker: (itemId: string) => void; onRemove: (itemId: string) => void; onToggleMenu: (itemId: string) => void; onUpload: (itemId: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
-  return <div ref={setNodeRef} style={{ opacity: isDragging ? 0.4 : 1, transform: CSS.Transform.toString(transform), transition }} {...attributes} {...listeners}><CardShell item={item} menuOpen={menuOpen} onLookup={onLookup} onOpenPicker={onOpenPicker} onRemove={onRemove} onToggleMenu={onToggleMenu} /></div>
+  return <div ref={setNodeRef} style={{ opacity: isDragging ? 0.4 : 1, transform: CSS.Transform.toString(transform), transition }} {...attributes} {...listeners}><CardShell item={item} menuOpen={menuOpen} onLookup={onLookup} onOpenPicker={onOpenPicker} onRemove={onRemove} onToggleMenu={onToggleMenu} onUpload={onUpload} /></div>
 }
 
-function CardShell({ item, menuOpen = false, onLookup, onOpenPicker, onRemove, onToggleMenu, overlay = false }: CardShellProps) {
+function CardShell({ item, menuOpen = false, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload, overlay = false }: CardShellProps) {
   return (
     <article className={`card ${overlay ? 'card-overlay' : ''}`}>
       <div className="card-image">
@@ -870,8 +927,9 @@ function CardShell({ item, menuOpen = false, onLookup, onOpenPicker, onRemove, o
         {!overlay && menuOpen ? (
           <div className="card-menu" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
             <button onClick={() => onLookup?.(item.id)} type="button">{item.image ? 'Refresh image' : 'Auto-pick image'}</button>
+            <button onClick={() => onUpload?.(item.id)} type="button">{item.image ? 'Upload replacement' : 'Upload image'}</button>
             <button onClick={() => onOpenPicker?.(item.id)} type="button">Choose image</button>
-            {item.image ? <a href={item.image.sourceUrl} rel="noreferrer" target="_blank">Open source</a> : null}
+            {item.image && hasSourceLink(item.image) ? <a href={item.image.sourceUrl} rel="noreferrer" target="_blank">Open source</a> : null}
             <button className="card-menu-danger" onClick={() => onRemove?.(item.id)} type="button">Remove item</button>
           </div>
         ) : null}
@@ -1004,6 +1062,68 @@ function filterProviderSelection(selection: ProviderSelection, availability: { g
   }
 }
 
+function createCustomImageResult(item: TierItem, previewUrl: string): ImageResult {
+  return {
+    attribution: 'Uploaded from your device.',
+    confidence: 1,
+    creator: '',
+    id: `${item.id}:custom-image`,
+    license: 'Private upload',
+    matchMethod: 'manual',
+    previewUrl,
+    provider: 'Custom upload',
+    reason: 'Uploaded manually.',
+    sourceUrl: '',
+    title: `${item.name} custom image`,
+  }
+}
+
+async function resizeImageFile(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Choose an image file to upload.')
+  }
+
+  const dataUrl = await readFileAsDataUrl(file)
+  const image = await loadImageElement(dataUrl)
+  const maxEdge = 720
+  const longestEdge = Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height, 1)
+  const scale = Math.min(1, maxEdge / longestEdge)
+  const width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale))
+  const height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+
+  if (!context) {
+    throw new Error('This browser could not process the uploaded image.')
+  }
+
+  context.drawImage(image, 0, 0, width, height)
+  return canvas.toDataURL('image/webp', 0.86)
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') resolve(reader.result)
+      else reject(new Error('Unable to read that image file.'))
+    }
+    reader.onerror = () => reject(new Error('Unable to read that image file.'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('Unable to load that image file.'))
+    image.src = src
+  })
+}
+
 function createBoard(tiers: TierConfig[]): BoardState { return { [POOL_ID]: [], ...Object.fromEntries(tiers.map((tier) => [tier.id, []])) } }
 
 function normalizeBoard(board: BoardState, tiers: TierConfig[], itemsById: Record<string, TierItem>): BoardState {
@@ -1054,6 +1174,7 @@ function moveItemToContainer(board: BoardState, itemId: string, fromContainer: s
 }
 function initialsFor(value: string) { return value.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') }
 function slugify(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') }
+function hasSourceLink(image: ImageResult) { return Boolean(image.sourceUrl) && !image.sourceUrl.startsWith('data:') }
 function matchMethodLabel(method: MatchMethod) { switch (method) { case 'local-ai': return 'local AI scoring'; case 'gemini': return 'Gemini fallback'; case 'groq': return 'Groq fallback'; default: return 'heuristic fallback' } }
 function matchMethodShortLabel(method: MatchMethod) { switch (method) { case 'local-ai': return 'Local AI'; case 'gemini': return 'Gemini'; case 'groq': return 'Groq'; case 'manual': return 'Manual'; default: return 'Heuristic' } }
 function matchSummary(image: ImageResult) { return image.matchMethod === 'manual' ? 'Manual pick' : `${matchMethodShortLabel(image.matchMethod)} / ${Math.round(image.confidence * 100)}%` }
