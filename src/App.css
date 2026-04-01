@@ -834,6 +834,10 @@
   box-shadow:
     0 16px 28px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(133, 167, 255, 0.04);
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .card-overlay {
@@ -842,6 +846,14 @@
   box-shadow:
     0 28px 42px rgba(0, 0, 0, 0.4),
     0 0 28px rgba(47, 107, 255, 0.2);
+}
+
+.card-file-over {
+  border-color: rgba(118, 171, 255, 0.64);
+  box-shadow:
+    0 22px 36px rgba(0, 0, 0, 0.36),
+    0 0 0 1px rgba(80, 146, 255, 0.3),
+    0 0 28px rgba(47, 107, 255, 0.22);
 }
 
 .card-image {
@@ -887,6 +899,35 @@
   font-size: 0.72rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.card-drop-hint {
+  position: absolute;
+  inset: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 16px;
+  border: 1px dashed rgba(164, 196, 255, 0.5);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(5, 11, 24, 0.14), rgba(5, 11, 24, 0.78)),
+    radial-gradient(circle at top left, rgba(47, 107, 255, 0.3), transparent 40%);
+  color: #eef5ff;
+  pointer-events: none;
+}
+
+.card-drop-hint strong {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.card-drop-hint span {
+  color: #c8dbff;
+  font-size: 0.82rem;
 }
 
 .card-menu-trigger {
@@ -935,6 +976,13 @@
   margin: 6px 0 0;
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+.card-drop-copy {
+  margin: 0;
+  color: #8ea8d7;
+  font-size: 0.73rem;
+  line-height: 1.45;
 }
 
 .card-meta {
