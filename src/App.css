@@ -647,6 +647,78 @@
   opacity: 0.56;
 }
 
+.theme-menu-panel {
+  width: min(420px, 86vw);
+}
+
+.theme-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.theme-option {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(82, 108, 168, 0.24);
+  border-radius: 16px;
+  background: rgba(7, 13, 28, 0.88);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+
+.theme-option:hover {
+  transform: translateY(-1px);
+  border-color: rgba(138, 170, 238, 0.48);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+}
+
+.theme-option-active {
+  border-color: rgba(133, 178, 255, 0.54);
+  box-shadow:
+    inset 0 0 0 1px rgba(133, 178, 255, 0.24),
+    0 14px 26px rgba(0, 0, 0, 0.22);
+}
+
+.theme-option-swatch {
+  width: 100%;
+  height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: var(--theme-gradient);
+}
+
+.theme-option-swatch-custom {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0 10px, rgba(255, 255, 255, 0.03) 10px 20px);
+}
+
+.theme-option-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.theme-option-copy strong {
+  color: var(--text);
+  font-size: 0.84rem;
+}
+
+.theme-option-copy small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
 .ghost-button-active {
   border-color: rgba(146, 160, 180, 0.44);
   background: linear-gradient(180deg, rgba(49, 56, 69, 0.96), rgba(28, 33, 42, 0.96));

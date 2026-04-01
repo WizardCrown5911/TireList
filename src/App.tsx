@@ -44,7 +44,8 @@ type TierItem = { context: string; id: string; image?: ImageResult; imageError?:
 type TierConfig = { color: string; id: string; label: string }
 type BoardState = Record<string, string[]>
 type ProviderSelection = { rankers: RankerProvider[]; sources: SourceProvider[] }
-type SavedState = { board: BoardState; compactMode: boolean; itemsById: Record<string, TierItem>; listContext: string; providerSelection: ProviderSelection; title: string; tiers: TierConfig[] }
+type TierThemeId = 'custom' | 'forge' | 'aurora' | 'inferno' | 'toxic'
+type SavedState = { board: BoardState; compactMode: boolean; itemsById: Record<string, TierItem>; listContext: string; providerSelection: ProviderSelection; tierThemeId: TierThemeId; title: string; tiers: TierConfig[] }
 type HealthResponse = { mode: string; ok: boolean; providers?: { gemini: { configured: boolean; model: string }; google: { configured: boolean }; groq: { configured: boolean; model: string }; local: { configured: boolean; model: string } }; ranker?: { available?: boolean; error: string | null; model: string; ready: boolean; state: string } }
 type LookupResponse = { candidates?: ImageResult[]; query: string; result: ImageResult }
 type SuggestItemsResponse = { items: Array<{ context: string; name: string }>; title: string }
@@ -91,6 +92,30 @@ const DEFAULT_TIERS: TierConfig[] = [
 ]
 const SOURCE_PROVIDER_ORDER: SourceProvider[] = ['commons', 'wikipedia', 'openverse', 'google']
 const RANKER_PROVIDER_ORDER: RankerProvider[] = ['local', 'gemini', 'groq']
+const TIER_THEME_ORDER: Array<Exclude<TierThemeId, 'custom'>> = ['forge', 'aurora', 'inferno', 'toxic']
+const DEFAULT_TIER_THEME_ID: Exclude<TierThemeId, 'custom'> = 'forge'
+const TIER_THEME_PRESETS: Record<Exclude<TierThemeId, 'custom'>, { colors: string[]; description: string; label: string }> = {
+  aurora: {
+    colors: ['#79f2ff', '#3d9dff', '#5b67ff', '#13203d'],
+    description: 'Cold blue neon fading into deep space.',
+    label: 'Aurora',
+  },
+  forge: {
+    colors: ['#ff4d6d', '#ff7b54', '#446dff', '#122447'],
+    description: 'The default red-to-blue forged gradient.',
+    label: 'Forge',
+  },
+  inferno: {
+    colors: ['#ff5a36', '#ff9f43', '#ff477e', '#281441'],
+    description: 'Hot ember tones with a dark burn-out base.',
+    label: 'Inferno',
+  },
+  toxic: {
+    colors: ['#d5ff57', '#6bff8f', '#18b7b3', '#11273a'],
+    description: 'Acid green and teal over a dark chassis.',
+    label: 'Toxic',
+  },
+}
 const LEGACY_PROVIDER_SELECTION: ProviderSelection = {
   rankers: [...RANKER_PROVIDER_ORDER],
   sources: [...SOURCE_PROVIDER_ORDER],
@@ -106,6 +131,7 @@ function App() {
   const [listContext, setListContext] = useState(initialState.listContext)
   const [compactMode, setCompactMode] = useState(initialState.compactMode)
   const [providerSelection, setProviderSelection] = useState<ProviderSelection>(initialState.providerSelection)
+  const [tierThemeId, setTierThemeId] = useState<TierThemeId>(initialState.tierThemeId)
   const [tiers, setTiers] = useState<TierConfig[]>(initialState.tiers)
   const [itemsById, setItemsById] = useState<Record<string, TierItem>>(initialState.itemsById)
   const [board, setBoard] = useState<BoardState>(initialState.board)
@@ -128,6 +154,7 @@ function App() {
   const [bulkRunning, setBulkRunning] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [providerMenuOpen, setProviderMenuOpen] = useState(false)
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const [pickerState, setPickerState] = useState<PickerState>({
     candidates: [],
     error: '',
@@ -143,6 +170,7 @@ function App() {
   const itemsRef = useRef(itemsById)
   const listContextRef = useRef(listContext)
   const providerSelectionRef = useRef(initialState.providerSelection)
+  const tierThemeRef = useRef(initialState.tierThemeId)
   const pendingUploadItemIdRef = useRef<string | null>(null)
   const storageWarningShownRef = useRef(false)
   const lastOverId = useRef<UniqueIdentifier | null>(null)
@@ -150,12 +178,13 @@ function App() {
   useEffect(() => { itemsRef.current = itemsById }, [itemsById])
   useEffect(() => { listContextRef.current = listContext }, [listContext])
   useEffect(() => { providerSelectionRef.current = providerSelection }, [providerSelection])
+  useEffect(() => { tierThemeRef.current = tierThemeId }, [tierThemeId])
   useEffect(() => { boardStateRef.current = board }, [board])
   useEffect(() => {
     try {
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ board: normalizeBoard(board, tiers, itemsById), compactMode, itemsById, listContext, providerSelection, title, tiers } satisfies SavedState),
+        JSON.stringify({ board: normalizeBoard(board, tiers, itemsById), compactMode, itemsById, listContext, providerSelection, tierThemeId, title, tiers } satisfies SavedState),
       )
       storageWarningShownRef.current = false
     } catch (error) {
@@ -168,7 +197,7 @@ function App() {
         })
       }
     }
-  }, [board, compactMode, itemsById, listContext, providerSelection, tiers, title])
+  }, [board, compactMode, itemsById, listContext, providerSelection, tierThemeId, tiers, title])
 
   useEffect(() => {
     let cancelled = false
@@ -277,6 +306,7 @@ function App() {
       itemsById: itemsRef.current,
       listContext: listContextRef.current,
       providerSelection: providerSelectionRef.current,
+      tierThemeId: tierThemeRef.current,
       title,
       tiers,
     } satisfies SavedState
@@ -323,12 +353,14 @@ function App() {
       setListContext(nextState.listContext)
       setCompactMode(nextState.compactMode)
       setProviderSelection(nextProviderSelection)
+      setTierThemeId(nextState.tierThemeId)
       setTiers(nextState.tiers)
       setItemsById(nextState.itemsById)
       boardStateRef.current = nextState.board
       setBoard(nextState.board)
       setMenuOpenId(null)
       setProviderMenuOpen(false)
+      setThemeMenuOpen(false)
       setTitleSuggestions([])
       setSelectedSuggestionIds([])
       setSuggestionError('')
@@ -931,6 +963,7 @@ function App() {
     setListContext(nextState.listContext)
     setCompactMode(nextState.compactMode)
     setProviderSelection(filterProviderSelection(nextState.providerSelection, providerAvailability))
+    setTierThemeId(nextState.tierThemeId)
     setTiers(nextState.tiers)
     itemsRef.current = nextState.itemsById
     setItemsById(nextState.itemsById)
@@ -940,6 +973,7 @@ function App() {
     resetTierDragState()
     setMenuOpenId(null)
     setProviderMenuOpen(false)
+    setThemeMenuOpen(false)
     setTitleSuggestions([])
     setSelectedSuggestionIds([])
     setSuggestionError('')
@@ -953,15 +987,38 @@ function App() {
     })
   }
 
+  function applyTierTheme(themeId: Exclude<TierThemeId, 'custom'>) {
+    setTierThemeId(themeId)
+    setTiers((current) => withTierThemeColors(current, themeId))
+    setThemeMenuOpen(false)
+    setNotice({
+      message: `${tierThemeLabel(themeId)} theme applied across the tier stack.`,
+      tone: 'success',
+    })
+  }
+
+  function useCustomTierColors() {
+    setTierThemeId('custom')
+    setThemeMenuOpen(false)
+    setNotice({
+      message: 'Tier colors are now in custom mode. Manual color edits will stay as-is.',
+      tone: 'info',
+    })
+  }
+
   function addTier() {
     const id = createId('tier')
     const nextTier: TierConfig = { color: '#2f6bff', id, label: `Tier ${tiers.length + 1}` }
-    setTiers((current) => [...current, nextTier])
+    setTiers((current) => withTierThemeColors([...current, nextTier], tierThemeRef.current))
     updateBoard((current) => ({ ...current, [id]: [] }))
   }
 
   function updateTier(tierId: string, field: keyof Pick<TierConfig, 'color' | 'label'>, value: string) {
     setTiers((current) => current.map((tier) => (tier.id === tierId ? { ...tier, [field]: value } : tier)))
+
+    if (field === 'color' && tierThemeRef.current !== 'custom') {
+      setTierThemeId('custom')
+    }
   }
 
   function resetTierDragState() {
@@ -1010,14 +1067,14 @@ function App() {
         return current
       }
 
-      return arrayMove(current, activeIndex, targetIndex)
+      return withTierThemeColors(arrayMove(current, activeIndex, targetIndex), tierThemeRef.current)
     })
     resetTierDragState()
   }
 
   function removeTier(tierId: string) {
     const idsToMove = getContainerItems(boardStateRef.current, tierId)
-    const nextTiers = tiers.filter((tier) => tier.id !== tierId)
+    const nextTiers = withTierThemeColors(tiers.filter((tier) => tier.id !== tierId), tierThemeRef.current)
     setTiers(nextTiers)
     updateBoard((current) => {
       const nextBoard = createBoard(nextTiers)
@@ -1105,7 +1162,7 @@ function App() {
     }
   }
   return (
-    <div className="app-shell" onPointerDown={() => { setMenuOpenId(null); setProviderMenuOpen(false) }}>
+    <div className="app-shell" onPointerDown={() => { setMenuOpenId(null); setProviderMenuOpen(false); setThemeMenuOpen(false) }}>
       <header className="hero-panel">
         <div className="hero-copy">
           <span className="eyebrow">Forge Tierlist</span>
@@ -1181,7 +1238,7 @@ function App() {
             <div><span className="board-title">{title || 'Untitled tier list'}</span><p className="board-subtitle">Drag cards between the pool and each lane. Edit tier names and colors in the lane headers, then use the drag handle there to reorder tiers.</p></div>
             <div className="toolbar-actions">
               <div className="toolbar-menu-shell" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-                <button className={`ghost-button ${providerMenuOpen ? 'ghost-button-active' : ''}`} onClick={() => setProviderMenuOpen((current) => !current)} onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }} type="button">Image APIs</button>
+                <button className={`ghost-button ${providerMenuOpen ? 'ghost-button-active' : ''}`} onClick={() => { setThemeMenuOpen(false); setProviderMenuOpen((current) => !current) }} onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }} type="button">Image APIs</button>
                 {providerMenuOpen ? (
                   <div className="toolbar-menu-panel">
                     <div className="toolbar-menu-header">
@@ -1219,6 +1276,35 @@ function App() {
                           </label>
                         )
                       })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <div className="toolbar-menu-shell" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                <button className={`ghost-button ${themeMenuOpen ? 'ghost-button-active' : ''}`} onClick={() => { setProviderMenuOpen(false); setThemeMenuOpen((current) => !current) }} onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }} type="button">Tier Theme</button>
+                {themeMenuOpen ? (
+                  <div className="toolbar-menu-panel theme-menu-panel">
+                    <div className="toolbar-menu-header">
+                      <strong>Tier Theme</strong>
+                      <span>{tierThemeLabel(tierThemeId)}</span>
+                    </div>
+                    <div className="theme-menu-grid">
+                      <button className={`theme-option ${tierThemeId === 'custom' ? 'theme-option-active' : ''}`} onClick={useCustomTierColors} type="button">
+                        <span className="theme-option-swatch theme-option-swatch-custom" />
+                        <span className="theme-option-copy">
+                          <strong>Custom</strong>
+                          <small>Keep the current colors exactly as they are.</small>
+                        </span>
+                      </button>
+                      {TIER_THEME_ORDER.map((themeId) => (
+                        <button className={`theme-option ${tierThemeId === themeId ? 'theme-option-active' : ''}`} key={themeId} onClick={() => applyTierTheme(themeId)} type="button">
+                          <span className="theme-option-swatch" style={{ '--theme-gradient': tierThemeGradient(themeId) } as CSSProperties} />
+                          <span className="theme-option-copy">
+                            <strong>{tierThemeLabel(themeId)}</strong>
+                            <small>{TIER_THEME_PRESETS[themeId].description}</small>
+                          </span>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 ) : null}
@@ -1477,7 +1563,8 @@ function ImagePickerModal({ candidates, currentImage, error, item, loading, onCh
   )
 }
 function createBaseState(): SavedState {
-  return { board: createBoard(DEFAULT_TIERS), compactMode: false, itemsById: {}, listContext: '', providerSelection: DEFAULT_PROVIDER_SELECTION, title: 'Untitled tier list', tiers: DEFAULT_TIERS }
+  const tiers = withTierThemeColors(DEFAULT_TIERS, DEFAULT_TIER_THEME_ID)
+  return { board: createBoard(tiers), compactMode: false, itemsById: {}, listContext: '', providerSelection: DEFAULT_PROVIDER_SELECTION, tierThemeId: DEFAULT_TIER_THEME_ID, title: 'Untitled tier list', tiers }
 }
 
 function hydrateSavedState(parsed: Partial<SavedState> | null | undefined): SavedState {
@@ -1485,6 +1572,7 @@ function hydrateSavedState(parsed: Partial<SavedState> | null | undefined): Save
   const tiers = Array.isArray(parsed?.tiers) && parsed.tiers.length ? parsed.tiers : DEFAULT_TIERS
   const itemsById = sanitizeItems(parsed?.itemsById)
   const board = normalizeBoard(parsed?.board || createBoard(tiers), tiers, itemsById)
+  const tierThemeId = sanitizeTierThemeId(parsed?.tierThemeId)
 
   return {
     board,
@@ -1492,6 +1580,7 @@ function hydrateSavedState(parsed: Partial<SavedState> | null | undefined): Save
     itemsById,
     listContext: typeof parsed?.listContext === 'string' ? parsed.listContext : '',
     providerSelection: sanitizeProviderSelection(parsed?.providerSelection),
+    tierThemeId,
     title: typeof parsed?.title === 'string' ? parsed.title : baseState.title,
     tiers,
   }
@@ -1544,6 +1633,92 @@ function sanitizeProviderSelection(value: unknown): ProviderSelection {
     rankers,
     sources: sources.length ? sources : DEFAULT_PROVIDER_SELECTION.sources,
   }
+}
+
+function sanitizeTierThemeId(value: unknown): TierThemeId {
+  return typeof value === 'string' && (value === 'custom' || TIER_THEME_ORDER.includes(value as Exclude<TierThemeId, 'custom'>))
+    ? (value as TierThemeId)
+    : 'custom'
+}
+
+function tierThemeLabel(themeId: TierThemeId) {
+  return themeId === 'custom' ? 'Custom' : TIER_THEME_PRESETS[themeId].label
+}
+
+function tierThemeGradient(themeId: Exclude<TierThemeId, 'custom'>) {
+  return `linear-gradient(90deg, ${TIER_THEME_PRESETS[themeId].colors.join(', ')})`
+}
+
+function withTierThemeColors(tiers: TierConfig[], themeId: TierThemeId) {
+  if (themeId === 'custom') {
+    return tiers
+  }
+
+  const colors = sampleThemeColors(themeId, tiers.length)
+  return tiers.map((tier, index) => ({ ...tier, color: colors[index] || tier.color }))
+}
+
+function sampleThemeColors(themeId: Exclude<TierThemeId, 'custom'>, count: number) {
+  const stops = TIER_THEME_PRESETS[themeId].colors.map(hexToRgb)
+
+  if (!stops.length || count <= 0) {
+    return []
+  }
+
+  if (count === 1) {
+    return [rgbToHex(stops[0])]
+  }
+
+  return Array.from({ length: count }, (_, index) => {
+    const position = index / Math.max(1, count - 1)
+    return rgbToHex(sampleGradient(stops, position))
+  })
+}
+
+function sampleGradient(stops: Array<{ blue: number; green: number; red: number }>, position: number) {
+  if (stops.length === 1) {
+    return stops[0]
+  }
+
+  const safePosition = clamp(position, 0, 1)
+  const segmentLength = 1 / (stops.length - 1)
+  const segmentIndex = Math.min(stops.length - 2, Math.floor(safePosition / segmentLength))
+  const localStart = stops[segmentIndex]
+  const localEnd = stops[segmentIndex + 1]
+  const segmentPosition = (safePosition - segmentIndex * segmentLength) / segmentLength
+
+  return {
+    blue: Math.round(lerp(localStart.blue, localEnd.blue, segmentPosition)),
+    green: Math.round(lerp(localStart.green, localEnd.green, segmentPosition)),
+    red: Math.round(lerp(localStart.red, localEnd.red, segmentPosition)),
+  }
+}
+
+function hexToRgb(value: string) {
+  const normalized = value.replace('#', '').trim()
+  const expanded = normalized.length === 3 ? normalized.split('').map((entry) => `${entry}${entry}`).join('') : normalized.padEnd(6, '0').slice(0, 6)
+
+  return {
+    blue: Number.parseInt(expanded.slice(4, 6), 16),
+    green: Number.parseInt(expanded.slice(2, 4), 16),
+    red: Number.parseInt(expanded.slice(0, 2), 16),
+  }
+}
+
+function rgbToHex(color: { blue: number; green: number; red: number }) {
+  return `#${toHexChannel(color.red)}${toHexChannel(color.green)}${toHexChannel(color.blue)}`
+}
+
+function toHexChannel(value: number) {
+  return clamp(Math.round(value), 0, 255).toString(16).padStart(2, '0')
+}
+
+function lerp(start: number, end: number, amount: number) {
+  return start + (end - start) * amount
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
 }
 
 function filterProviderSelection(selection: ProviderSelection, availability: { gemini: boolean; google: boolean; groq: boolean; local: boolean }): ProviderSelection {
