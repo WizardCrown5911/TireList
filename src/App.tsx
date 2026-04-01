@@ -1456,12 +1456,37 @@ function TierEditorHeader({ count, dragging = false, dropTarget = false, onColor
         <div aria-label={`Reorder ${tier.label}`} className="tier-drag-handle" draggable onDragEnd={onDragEnd} onDragStart={onDragStart} role="button" tabIndex={0}>::</div>
         <strong className="tier-count-chip">{count}</strong>
       </div>
-      <input aria-label={`${tier.label} label`} className="tier-label-input" onChange={(event) => onLabelChange(event.target.value)} type="text" value={tier.label} />
+      <TierLabelEditor label={tier.label} onChange={onLabelChange} />
       <div className="tier-lane-tools">
         <input aria-label={`${tier.label} color`} className="color-picker tier-color-picker" onChange={(event) => onColorChange(event.target.value)} type="color" value={tier.color} />
         <button aria-label={`Remove ${tier.label}`} className="icon-button tier-remove-button" disabled={!removable} onClick={onRemove} type="button">x</button>
       </div>
     </div>
+  )
+}
+
+function TierLabelEditor({ label, onChange }: { label: string; onChange: (value: string) => void }) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  useEffect(() => {
+    const element = textareaRef.current
+    if (!element) {
+      return
+    }
+
+    element.style.height = '0px'
+    element.style.height = `${element.scrollHeight}px`
+  }, [label])
+
+  return (
+    <textarea
+      aria-label={`${label || 'Tier'} label`}
+      className="tier-label-input"
+      onChange={(event) => onChange(event.target.value)}
+      ref={textareaRef}
+      rows={1}
+      value={label}
+    />
   )
 }
 

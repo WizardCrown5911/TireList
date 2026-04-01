@@ -864,7 +864,7 @@
 
 .lane {
   display: grid;
-  grid-template-columns: 168px minmax(0, 1fr);
+  grid-template-columns: minmax(184px, 220px) minmax(0, 1fr);
   gap: 12px;
   min-height: 184px;
   padding: 12px;
@@ -1046,14 +1046,21 @@
 .tier-label-input {
   width: 100%;
   box-sizing: border-box;
+  min-height: 46px;
   padding: 10px 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 14px;
   background: rgba(4, 9, 20, 0.22);
   color: white;
   font: inherit;
+  font-size: 0.94rem;
+  line-height: 1.2;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  resize: none;
+  white-space: pre-wrap;
 }
 
 .tier-label-input::placeholder {
@@ -1560,7 +1567,7 @@
 .board-surface-compact .lane {
   min-height: 156px;
   padding: 10px;
-  grid-template-columns: 144px minmax(0, 1fr);
+  grid-template-columns: minmax(164px, 196px) minmax(0, 1fr);
 }
 
 .board-surface-compact .lane-pool {
