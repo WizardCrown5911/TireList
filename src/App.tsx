@@ -153,6 +153,7 @@ function App() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [draggingTierId, setDraggingTierId] = useState<string | null>(null)
   const [tierDropTargetId, setTierDropTargetId] = useState<string | null>(null)
+  const [tierReorderEnabled, setTierReorderEnabled] = useState(false)
   const [bulkRunning, setBulkRunning] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [providerMenuOpen, setProviderMenuOpen] = useState(false)
@@ -1098,6 +1099,14 @@ function App() {
     setTierDropTargetId(null)
   }
 
+  function toggleTierReorderMode() {
+    setTierReorderEnabled((current) => !current)
+    resetTierDragState()
+    setMenuOpenId(null)
+    setProviderMenuOpen(false)
+    setThemeMenuOpen(false)
+  }
+
   function handleTierHeaderDragStart(event: React.DragEvent<HTMLElement>, tierId: string) {
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', tierId)
@@ -1328,7 +1337,7 @@ function App() {
         </aside>
         <section className="board-column">
           <div className="board-toolbar">
-            <div><span className="board-title">{title || 'Untitled tier list'}</span><p className="board-subtitle">Drag cards between the pool and each lane. Edit tier names and colors in the lane headers, then use the drag handle there to reorder tiers.</p></div>
+            <div><span className="board-title">{title || 'Untitled tier list'}</span><p className="board-subtitle">Drag cards between the pool and each lane. Edit tier names and colors in the lane headers. {tierReorderEnabled ? 'Use the visible Move tier grips to reorder rows.' : 'Turn on Move tiers when you need to reorder rows.'}</p></div>
             <div className="toolbar-actions">
               <div className="toolbar-menu-shell" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
                 <button className={`ghost-button ${providerMenuOpen ? 'ghost-button-active' : ''}`} onClick={() => { setThemeMenuOpen(false); setProviderMenuOpen((current) => !current) }} onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }} type="button">Image APIs</button>
@@ -1402,6 +1411,7 @@ function App() {
                   </div>
                 ) : null}
               </div>
+              <button className={`ghost-button ${tierReorderEnabled ? 'ghost-button-active' : ''}`} onClick={toggleTierReorderMode} type="button">{tierReorderEnabled ? 'Done moving tiers' : 'Move tiers'}</button>
               <button className="ghost-button" onClick={downloadListFile} type="button">Save list</button>
               <button className="ghost-button" onClick={openImportDialog} type="button">Import list</button>
               <button className={`ghost-button ${compactMode ? 'ghost-button-active' : ''}`} onClick={() => setCompactMode((current) => !current)} type="button">{compactMode ? 'Standard cards' : 'Compact mode'}</button>
@@ -1412,7 +1422,7 @@ function App() {
             <DndContext collisionDetection={collisionDetectionStrategy} onDragCancel={handleDragCancel} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragStart={handleDragStart} sensors={sensors}>
               <div className="board-shell" ref={boardExportRef}>
                 {tiers.map((tier) => (
-                  <TierLane color={tier.color} emptyMessage={`Drop cards into ${tier.label}.`} header={<TierEditorHeader dropTarget={Boolean(draggingTierId) && tierDropTargetId === tier.id && draggingTierId !== tier.id} onColorChange={(value) => updateTier(tier.id, 'color', value)} onDragEnd={resetTierDragState} onDragOver={(event) => handleTierHeaderDragOver(event, tier.id)} onDragStart={(event) => handleTierHeaderDragStart(event, tier.id)} onDrop={(event) => handleTierHeaderDrop(event, tier.id)} onLabelChange={(value) => updateTier(tier.id, 'label', value)} onRemove={() => removeTier(tier.id)} removable={tiers.length > 1} tier={tier} dragging={draggingTierId === tier.id} />} id={tier.id} items={mapIdsToItems(board[tier.id] || [], itemsById)} key={tier.id} menuOpenId={menuOpenId} onDropImage={handleImageDrop} onGenerateTextImage={generateTextImageForItem} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} />
+                  <TierLane color={tier.color} emptyMessage={`Drop cards into ${tier.label}.`} header={<TierEditorHeader dropTarget={Boolean(draggingTierId) && tierDropTargetId === tier.id && draggingTierId !== tier.id} onColorChange={(value) => updateTier(tier.id, 'color', value)} onDragEnd={resetTierDragState} onDragOver={(event) => handleTierHeaderDragOver(event, tier.id)} onDragStart={(event) => handleTierHeaderDragStart(event, tier.id)} onDrop={(event) => handleTierHeaderDrop(event, tier.id)} onLabelChange={(value) => updateTier(tier.id, 'label', value)} onRemove={() => removeTier(tier.id)} reorderEnabled={tierReorderEnabled} removable={tiers.length > 1} tier={tier} dragging={draggingTierId === tier.id} />} id={tier.id} items={mapIdsToItems(board[tier.id] || [], itemsById)} key={tier.id} menuOpenId={menuOpenId} onDropImage={handleImageDrop} onGenerateTextImage={generateTextImageForItem} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} />
                 ))}
                 <button className="lane-add-button" onClick={addTier} type="button">Add tier underneath</button>
               </div>
@@ -1437,10 +1447,10 @@ function Stat({ label, value }: { label: string; value: string }) {
   return <div className="stat-card"><span>{label}</span><strong>{value}</strong></div>
 }
 
-function TierEditorHeader({ dragging = false, dropTarget = false, onColorChange, onDragEnd, onDragOver, onDragStart, onDrop, onLabelChange, onRemove, removable, tier }: { dragging?: boolean; dropTarget?: boolean; onColorChange: (value: string) => void; onDragEnd: () => void; onDragOver: (event: React.DragEvent<HTMLElement>) => void; onDragStart: (event: React.DragEvent<HTMLElement>) => void; onDrop: (event: React.DragEvent<HTMLElement>) => void; onLabelChange: (value: string) => void; onRemove: () => void; removable: boolean; tier: TierConfig }) {
+function TierEditorHeader({ dragging = false, dropTarget = false, onColorChange, onDragEnd, onDragOver, onDragStart, onDrop, onLabelChange, onRemove, reorderEnabled, removable, tier }: { dragging?: boolean; dropTarget?: boolean; onColorChange: (value: string) => void; onDragEnd: () => void; onDragOver: (event: React.DragEvent<HTMLElement>) => void; onDragStart: (event: React.DragEvent<HTMLElement>) => void; onDrop: (event: React.DragEvent<HTMLElement>) => void; onLabelChange: (value: string) => void; onRemove: () => void; reorderEnabled: boolean; removable: boolean; tier: TierConfig }) {
   return (
     <div className={`tier-lane-header ${dragging ? 'tier-lane-header-dragging' : ''} ${dropTarget ? 'tier-lane-header-target' : ''}`} onDragOver={onDragOver} onDrop={onDrop}>
-      <div className="tier-lane-top">
+      {reorderEnabled ? <div className="tier-lane-top">
         <div aria-label={`Reorder ${tier.label}`} className="tier-drag-handle" draggable onDragEnd={onDragEnd} onDragStart={onDragStart} role="button" tabIndex={0}>
           <span className="tier-drag-icon" aria-hidden="true">
             <span />
@@ -1449,7 +1459,7 @@ function TierEditorHeader({ dragging = false, dropTarget = false, onColorChange,
           </span>
           <span>Move tier</span>
         </div>
-      </div>
+      </div> : null}
       <TierLabelEditor label={tier.label} onChange={onLabelChange} />
       <div className="tier-lane-tools">
         <input aria-label={`${tier.label} color`} className="color-picker tier-color-picker" onChange={(event) => onColorChange(event.target.value)} type="color" value={tier.color} />
