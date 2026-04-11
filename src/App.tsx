@@ -36,7 +36,7 @@ import './App.css'
 
 type NoticeTone = 'info' | 'success' | 'warning' | 'error'
 type ImageStatus = 'idle' | 'loading' | 'ready' | 'error'
-type MatchMethod = 'heuristic' | 'local-ai' | 'gemini' | 'groq' | 'manual'
+type MatchMethod = 'heuristic' | 'local-ai' | 'gemini' | 'groq' | 'manual' | 'text-image'
 type SourceProvider = 'commons' | 'wikipedia' | 'openverse' | 'google'
 type RankerProvider = 'local' | 'gemini' | 'groq'
 type ImageResult = { attribution: string; confidence: number; creator: string; id: string; license: string; matchMethod: MatchMethod; previewUrl: string; provider: string; reason: string; sourceUrl: string; title: string }
@@ -63,6 +63,7 @@ type LaneProps = {
   menuOpenId: string | null
   onDropFiles?: (files: FileList | null) => void
   onDropImage: (itemId: string, files: FileList | null) => void
+  onGenerateTextImage: (itemId: string) => void
   onLookup: (itemId: string) => void
   onOpenPicker: (itemId: string) => void
   onRemove: (itemId: string) => void
@@ -73,6 +74,7 @@ type CardShellProps = {
   item: TierItem
   menuOpen?: boolean
   onDropImage?: (itemId: string, files: FileList | null) => void
+  onGenerateTextImage?: (itemId: string) => void
   onLookup?: (itemId: string) => void
   onOpenPicker?: (itemId: string) => void
   onRemove?: (itemId: string) => void
@@ -709,6 +711,65 @@ function App() {
     }
   }
 
+  function generateTextImageForItem(itemId: string, silent = false) {
+    const item = itemsRef.current[itemId]
+    if (!item) {
+      return false
+    }
+
+    try {
+      const previewUrl = createTextImageDataUrl(item)
+      patchItem(itemId, {
+        image: createTextImageResult(item, previewUrl),
+        imageError: '',
+        imageStatus: 'ready',
+      })
+      setMenuOpenId(null)
+
+      if (!silent) {
+        setNotice({
+          message: `${item.name} now uses a generated text image.`,
+          tone: 'success',
+        })
+      }
+
+      return true
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : `Unable to generate a text image for ${item.name}.`
+      patchItem(itemId, { imageError: message, imageStatus: 'error' })
+      if (!silent) setNotice({ message, tone: 'error' })
+      return false
+    }
+  }
+
+  function generateTextImagesForAll() {
+    const itemIds = Object.keys(itemsRef.current)
+
+    if (!itemIds.length) {
+      setNotice({
+        message: 'Add a few items before generating text images.',
+        tone: 'warning',
+      })
+      return
+    }
+
+    let generated = 0
+
+    for (const itemId of itemIds) {
+      if (generateTextImageForItem(itemId, true)) {
+        generated += 1
+      }
+    }
+
+    setNotice({
+      message: `Generated text image${generated === 1 ? '' : 's'} for ${generated} item${generated === 1 ? '' : 's'}.`,
+      tone: generated ? 'success' : 'warning',
+    })
+  }
+
   function handleImageDrop(itemId: string, files: FileList | null) {
     const file = Array.from(files || []).find((entry) => entry.type.startsWith('image/')) || null
 
@@ -1272,7 +1333,10 @@ function App() {
                   ) : (
                     <div className={`finder-state ${suggestionError ? 'finder-state-error' : ''}`}>{suggestionError || 'Set a title, then generate a batch of related items to review before adding them.'}</div>
                   )}
-                  <div className="button-row"><button className="accent-button" disabled={bulkRunning || autoPickingItems || !Object.keys(itemsById).length} onClick={() => { void lookupAllImages() }} type="button">{bulkRunning || autoPickingItems ? 'Matching images...' : 'Find images for all'}</button></div>
+                  <div className="button-row">
+                    <button className="accent-button" disabled={bulkRunning || autoPickingItems || !Object.keys(itemsById).length} onClick={() => { void lookupAllImages() }} type="button">{bulkRunning || autoPickingItems ? 'Matching images...' : 'Find images for all'}</button>
+                    <button className="ghost-button" disabled={bulkRunning || autoPickingItems || !Object.keys(itemsById).length} onClick={generateTextImagesForAll} type="button">Generate text images</button>
+                  </div>
                 </Panel>
                 <div className={`notice notice-${notice.tone}`}><strong>{backendReady === false ? 'Backend offline.' : 'Status.'}</strong><span>{notice.message}</span></div>
                 <div className="meta-card"><p>Current image APIs: {selectionSummary(providerSelection)}.</p><p>Choose sources and AI rerankers from the `Image APIs` dropdown. With no AI rankers selected, the app falls back to metadata-only matching.</p></div>
@@ -1366,12 +1430,12 @@ function App() {
             <DndContext collisionDetection={collisionDetectionStrategy} onDragCancel={handleDragCancel} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragStart={handleDragStart} sensors={sensors}>
               <div className="board-shell" ref={boardExportRef}>
                 {tiers.map((tier) => (
-                  <TierLane color={tier.color} emptyMessage={`Drop cards into ${tier.label}.`} header={<TierEditorHeader count={getContainerItems(board, tier.id).length} dropTarget={Boolean(draggingTierId) && tierDropTargetId === tier.id && draggingTierId !== tier.id} onColorChange={(value) => updateTier(tier.id, 'color', value)} onDragEnd={resetTierDragState} onDragOver={(event) => handleTierHeaderDragOver(event, tier.id)} onDragStart={(event) => handleTierHeaderDragStart(event, tier.id)} onDrop={(event) => handleTierHeaderDrop(event, tier.id)} onLabelChange={(value) => updateTier(tier.id, 'label', value)} onRemove={() => removeTier(tier.id)} removable={tiers.length > 1} tier={tier} dragging={draggingTierId === tier.id} />} id={tier.id} items={mapIdsToItems(board[tier.id] || [], itemsById)} key={tier.id} menuOpenId={menuOpenId} onDropImage={handleImageDrop} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} />
+                  <TierLane color={tier.color} emptyMessage={`Drop cards into ${tier.label}.`} header={<TierEditorHeader count={getContainerItems(board, tier.id).length} dropTarget={Boolean(draggingTierId) && tierDropTargetId === tier.id && draggingTierId !== tier.id} onColorChange={(value) => updateTier(tier.id, 'color', value)} onDragEnd={resetTierDragState} onDragOver={(event) => handleTierHeaderDragOver(event, tier.id)} onDragStart={(event) => handleTierHeaderDragStart(event, tier.id)} onDrop={(event) => handleTierHeaderDrop(event, tier.id)} onLabelChange={(value) => updateTier(tier.id, 'label', value)} onRemove={() => removeTier(tier.id)} removable={tiers.length > 1} tier={tier} dragging={draggingTierId === tier.id} />} id={tier.id} items={mapIdsToItems(board[tier.id] || [], itemsById)} key={tier.id} menuOpenId={menuOpenId} onDropImage={handleImageDrop} onGenerateTextImage={generateTextImageForItem} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} />
                 ))}
                 <button className="lane-add-button" onClick={addTier} type="button">Add tier underneath</button>
               </div>
               <div className="pool-island-wrap">
-                <TierLane color="#7a808e" emptyMessage="Drop cards here or drop image files to create new items." header={<div className="lane-label-basic"><span className="lane-label-title">Pool</span><strong className="lane-label-count">{poolItems.length}</strong></div>} id={POOL_ID} isPool items={poolItems} menuOpenId={menuOpenId} onDropFiles={(files) => { void addDroppedImagesToPool(files) }} onDropImage={handleImageDrop} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} />
+                <TierLane color="#7a808e" emptyMessage="Drop cards here or drop image files to create new items." header={<div className="lane-label-basic"><span className="lane-label-title">Pool</span><strong className="lane-label-count">{poolItems.length}</strong></div>} id={POOL_ID} isPool items={poolItems} menuOpenId={menuOpenId} onDropFiles={(files) => { void addDroppedImagesToPool(files) }} onDropImage={handleImageDrop} onGenerateTextImage={generateTextImageForItem} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} />
               </div>
               <DragOverlay>{activeItem ? <CardShell item={activeItem} overlay /> : null}</DragOverlay>
             </DndContext>
@@ -1432,7 +1496,7 @@ function TierLabelEditor({ label, onChange }: { label: string; onChange: (value:
   )
 }
 
-function TierLane({ color, emptyMessage, header, id, isPool = false, items, menuOpenId, onDropFiles, onDropImage, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload }: LaneProps) {
+function TierLane({ color, emptyMessage, header, id, isPool = false, items, menuOpenId, onDropFiles, onDropImage, onGenerateTextImage, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload }: LaneProps) {
   const { isOver, setNodeRef } = useDroppable({ id })
   const [isFileOver, setIsFileOver] = useState(false)
   const fileDragDepthRef = useRef(0)
@@ -1492,7 +1556,7 @@ function TierLane({ color, emptyMessage, header, id, isPool = false, items, menu
       <div className="lane-label">{header}</div>
       <SortableContext items={items.map((item) => item.id)} strategy={rectSortingStrategy}>
         <div className="lane-grid">
-          {items.map((item) => <SortableCard item={item} key={item.id} menuOpen={menuOpenId === item.id} onDropImage={onDropImage} onLookup={onLookup} onOpenPicker={onOpenPicker} onRemove={onRemove} onToggleMenu={onToggleMenu} onUpload={onUpload} />)}
+          {items.map((item) => <SortableCard item={item} key={item.id} menuOpen={menuOpenId === item.id} onDropImage={onDropImage} onGenerateTextImage={onGenerateTextImage} onLookup={onLookup} onOpenPicker={onOpenPicker} onRemove={onRemove} onToggleMenu={onToggleMenu} onUpload={onUpload} />)}
           {!items.length ? <div className="lane-empty">{emptyMessage}</div> : null}
         </div>
       </SortableContext>
@@ -1501,12 +1565,12 @@ function TierLane({ color, emptyMessage, header, id, isPool = false, items, menu
   )
 }
 
-function SortableCard({ item, menuOpen = false, onDropImage, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload }: { item: TierItem; menuOpen?: boolean; onDropImage: (itemId: string, files: FileList | null) => void; onLookup: (itemId: string) => void; onOpenPicker: (itemId: string) => void; onRemove: (itemId: string) => void; onToggleMenu: (itemId: string) => void; onUpload: (itemId: string) => void }) {
+function SortableCard({ item, menuOpen = false, onDropImage, onGenerateTextImage, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload }: { item: TierItem; menuOpen?: boolean; onDropImage: (itemId: string, files: FileList | null) => void; onGenerateTextImage: (itemId: string) => void; onLookup: (itemId: string) => void; onOpenPicker: (itemId: string) => void; onRemove: (itemId: string) => void; onToggleMenu: (itemId: string) => void; onUpload: (itemId: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
-  return <div ref={setNodeRef} style={{ opacity: isDragging ? 0.4 : 1, transform: CSS.Transform.toString(transform), transition }} {...attributes} {...listeners}><CardShell item={item} menuOpen={menuOpen} onDropImage={onDropImage} onLookup={onLookup} onOpenPicker={onOpenPicker} onRemove={onRemove} onToggleMenu={onToggleMenu} onUpload={onUpload} /></div>
+  return <div ref={setNodeRef} style={{ opacity: isDragging ? 0.4 : 1, transform: CSS.Transform.toString(transform), transition }} {...attributes} {...listeners}><CardShell item={item} menuOpen={menuOpen} onDropImage={onDropImage} onGenerateTextImage={onGenerateTextImage} onLookup={onLookup} onOpenPicker={onOpenPicker} onRemove={onRemove} onToggleMenu={onToggleMenu} onUpload={onUpload} /></div>
 }
 
-function CardShell({ item, menuOpen = false, onDropImage, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload, overlay = false }: CardShellProps) {
+function CardShell({ item, menuOpen = false, onDropImage, onGenerateTextImage, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload, overlay = false }: CardShellProps) {
   const [isFileOver, setIsFileOver] = useState(false)
   const dragDepthRef = useRef(0)
 
@@ -1579,6 +1643,7 @@ function CardShell({ item, menuOpen = false, onDropImage, onLookup, onOpenPicker
         {!overlay && menuOpen ? (
           <div className="card-menu" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
             <button onClick={() => onLookup?.(item.id)} type="button">{item.image ? 'Refresh image' : 'Auto-pick image'}</button>
+            <button onClick={() => onGenerateTextImage?.(item.id)} type="button">{item.image?.matchMethod === 'text-image' ? 'Regenerate text image' : 'Use text image'}</button>
             <button onClick={() => onUpload?.(item.id)} type="button">{item.image ? 'Upload replacement' : 'Upload image'}</button>
             <button onClick={() => onOpenPicker?.(item.id)} type="button">Choose image</button>
             {item.image && hasSourceLink(item.image) ? <a href={item.image.sourceUrl} rel="noreferrer" target="_blank">Open source</a> : null}
@@ -1820,6 +1885,232 @@ function createCustomImageResult(item: TierItem, previewUrl: string): ImageResul
   }
 }
 
+function createTextImageResult(item: TierItem, previewUrl: string): ImageResult {
+  return {
+    attribution: 'Generated in this app from the item name.',
+    confidence: 1,
+    creator: 'Forge Tierlist',
+    id: `${item.id}:text-image`,
+    license: 'Generated locally',
+    matchMethod: 'text-image',
+    previewUrl,
+    provider: 'Text image',
+    reason: 'Generated from the item name as a graphic text card.',
+    sourceUrl: '',
+    title: `${item.name} text image`,
+  }
+}
+
+function createTextImageDataUrl(item: TierItem): string {
+  const size = 720
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const context = canvas.getContext('2d')
+
+  if (!context) {
+    throw new Error('This browser could not generate a text image.')
+  }
+
+  const palette = getTextImagePalette(item.name)
+  const label = item.name.trim() || 'Untitled'
+  const background = context.createLinearGradient(0, 0, size, size)
+  background.addColorStop(0, palette[0])
+  background.addColorStop(0.5, palette[1])
+  background.addColorStop(1, palette[2])
+  context.fillStyle = background
+  context.fillRect(0, 0, size, size)
+
+  drawTextImageGlow(context, size, 160, 128, palette[3], 0.52)
+  drawTextImageGlow(context, size, 590, 580, '#ff355e', 0.24)
+  drawTextImageGrid(context, size)
+  drawTextImageFrame(context, size)
+
+  const maxTextWidth = size - 112
+  const fitted = fitTextToCanvas(context, label.toUpperCase(), maxTextWidth)
+  const totalTextHeight = fitted.lines.length * fitted.lineHeight
+  let y = (size - totalTextHeight) / 2 + fitted.fontSize * 0.82
+
+  context.textAlign = 'center'
+  context.textBaseline = 'alphabetic'
+  context.font = `900 ${fitted.fontSize}px "Arial Black", Impact, sans-serif`
+  context.lineJoin = 'round'
+
+  for (const line of fitted.lines) {
+    context.strokeStyle = 'rgba(2, 6, 14, 0.88)'
+    context.lineWidth = Math.max(10, fitted.fontSize * 0.12)
+    context.shadowColor = 'rgba(0, 0, 0, 0.58)'
+    context.shadowBlur = 18
+    context.strokeText(line, size / 2, y)
+    context.shadowColor = palette[4]
+    context.shadowBlur = 22
+    context.fillStyle = '#f7fbff'
+    context.fillText(line, size / 2, y)
+    y += fitted.lineHeight
+  }
+
+  context.shadowBlur = 0
+  context.fillStyle = 'rgba(230, 239, 255, 0.72)'
+  context.font = '700 24px Arial, sans-serif'
+  context.letterSpacing = '4px'
+  context.fillText('FORGE TIERLIST', size / 2, size - 52)
+  context.letterSpacing = '0px'
+
+  return canvas.toDataURL('image/webp', 0.9)
+}
+
+function drawTextImageGlow(context: CanvasRenderingContext2D, size: number, x: number, y: number, color: string, alpha: number) {
+  const glow = context.createRadialGradient(x, y, 0, x, y, size * 0.58)
+  glow.addColorStop(0, colorToRgba(color, alpha))
+  glow.addColorStop(1, 'rgba(0, 0, 0, 0)')
+  context.fillStyle = glow
+  context.fillRect(0, 0, size, size)
+}
+
+function drawTextImageGrid(context: CanvasRenderingContext2D, size: number) {
+  context.save()
+  context.globalAlpha = 0.22
+  context.strokeStyle = 'rgba(210, 226, 255, 0.18)'
+  context.lineWidth = 1
+
+  for (let offset = -size; offset <= size * 2; offset += 48) {
+    context.beginPath()
+    context.moveTo(offset, 0)
+    context.lineTo(offset + size, size)
+    context.stroke()
+  }
+
+  for (let offset = 0; offset <= size; offset += 48) {
+    context.beginPath()
+    context.moveTo(0, offset)
+    context.lineTo(size, offset)
+    context.stroke()
+  }
+
+  context.restore()
+}
+
+function drawTextImageFrame(context: CanvasRenderingContext2D, size: number) {
+  context.save()
+  context.strokeStyle = 'rgba(236, 244, 255, 0.34)'
+  context.lineWidth = 4
+  context.strokeRect(30, 30, size - 60, size - 60)
+  context.strokeStyle = 'rgba(255, 53, 94, 0.42)'
+  context.lineWidth = 2
+  context.strokeRect(46, 46, size - 92, size - 92)
+  context.fillStyle = 'rgba(2, 6, 14, 0.26)'
+  context.fillRect(54, 54, size - 108, size - 108)
+  context.restore()
+}
+
+function fitTextToCanvas(context: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  for (let fontSize = 96; fontSize >= 34; fontSize -= 2) {
+    context.font = `900 ${fontSize}px "Arial Black", Impact, sans-serif`
+    const lines = wrapCanvasText(context, text, maxWidth)
+
+    if (lines.length <= 5) {
+      return {
+        fontSize,
+        lineHeight: fontSize * 1.04,
+        lines,
+      }
+    }
+  }
+
+  const fontSize = 34
+  context.font = `900 ${fontSize}px "Arial Black", Impact, sans-serif`
+
+  return {
+    fontSize,
+    lineHeight: fontSize * 1.08,
+    lines: wrapCanvasText(context, text, maxWidth).slice(0, 6),
+  }
+}
+
+function wrapCanvasText(context: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  const words = text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+  const lines: string[] = []
+  let currentLine = ''
+
+  for (const word of words) {
+    if (context.measureText(word).width > maxWidth) {
+      if (currentLine) {
+        lines.push(currentLine)
+        currentLine = ''
+      }
+      lines.push(...splitLongCanvasWord(context, word, maxWidth))
+      continue
+    }
+
+    const nextLine = currentLine ? `${currentLine} ${word}` : word
+
+    if (context.measureText(nextLine).width <= maxWidth) {
+      currentLine = nextLine
+    } else {
+      lines.push(currentLine)
+      currentLine = word
+    }
+  }
+
+  if (currentLine) {
+    lines.push(currentLine)
+  }
+
+  return lines.length ? lines : ['UNTITLED']
+}
+
+function splitLongCanvasWord(context: CanvasRenderingContext2D, word: string, maxWidth: number) {
+  const chunks: string[] = []
+  let currentChunk = ''
+
+  for (const character of word) {
+    const nextChunk = `${currentChunk}${character}`
+
+    if (!currentChunk || context.measureText(nextChunk).width <= maxWidth) {
+      currentChunk = nextChunk
+    } else {
+      chunks.push(currentChunk)
+      currentChunk = character
+    }
+  }
+
+  if (currentChunk) {
+    chunks.push(currentChunk)
+  }
+
+  return chunks
+}
+
+function getTextImagePalette(value: string) {
+  const palettes = [
+    ['#03142f', '#1746f4', '#060914', '#2f6bff', 'rgba(83, 158, 255, 0.72)'],
+    ['#240713', '#d91d45', '#08152f', '#ff355e', 'rgba(255, 71, 116, 0.7)'],
+    ['#071c28', '#00a7c7', '#09101f', '#5ff5ff', 'rgba(95, 245, 255, 0.68)'],
+    ['#1b102c', '#5e37ff', '#070a18', '#9c7dff', 'rgba(156, 125, 255, 0.68)'],
+    ['#201204', '#ff7b32', '#091126', '#ff3d5c', 'rgba(255, 123, 50, 0.7)'],
+  ] as const
+
+  return palettes[Math.abs(hashString(value)) % palettes.length]
+}
+
+function hashString(value: string) {
+  let hash = 0
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0
+  }
+
+  return hash
+}
+
+function colorToRgba(hex: string, alpha: number) {
+  const normalized = hex.replace('#', '')
+  const red = Number.parseInt(normalized.slice(0, 2), 16)
+  const green = Number.parseInt(normalized.slice(2, 4), 16)
+  const blue = Number.parseInt(normalized.slice(4, 6), 16)
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`
+}
+
 async function resizeImageFile(file: File): Promise<string> {
   if (!file.type.startsWith('image/')) {
     throw new Error('Choose an image file to upload.')
@@ -2012,9 +2303,9 @@ function isLegacyDefaultProviderSelection(selection: ProviderSelection) {
 function arraysEqual<T>(left: T[], right: T[]) {
   return left.length === right.length && left.every((value, index) => value === right[index])
 }
-function matchMethodLabel(method: MatchMethod) { switch (method) { case 'local-ai': return 'local AI scoring'; case 'gemini': return 'Gemini fallback'; case 'groq': return 'Groq fallback'; default: return 'heuristic fallback' } }
-function matchMethodShortLabel(method: MatchMethod) { switch (method) { case 'local-ai': return 'Local AI'; case 'gemini': return 'Gemini'; case 'groq': return 'Groq'; case 'manual': return 'Manual'; default: return 'Heuristic' } }
-function matchSummary(image: ImageResult) { return image.matchMethod === 'manual' ? 'Manual pick' : `${matchMethodShortLabel(image.matchMethod)} / ${Math.round(image.confidence * 100)}%` }
+function matchMethodLabel(method: MatchMethod) { switch (method) { case 'local-ai': return 'local AI scoring'; case 'gemini': return 'Gemini fallback'; case 'groq': return 'Groq fallback'; case 'text-image': return 'generated text image'; default: return 'heuristic fallback' } }
+function matchMethodShortLabel(method: MatchMethod) { switch (method) { case 'local-ai': return 'Local AI'; case 'gemini': return 'Gemini'; case 'groq': return 'Groq'; case 'manual': return 'Manual'; case 'text-image': return 'Text image'; default: return 'Heuristic' } }
+function matchSummary(image: ImageResult) { return image.matchMethod === 'manual' ? 'Manual pick' : image.matchMethod === 'text-image' ? 'Generated text image' : `${matchMethodShortLabel(image.matchMethod)} / ${Math.round(image.confidence * 100)}%` }
 function isSourceProvider(value: unknown): value is SourceProvider { return typeof value === 'string' && SOURCE_PROVIDER_ORDER.includes(value as SourceProvider) }
 function isRankerProvider(value: unknown): value is RankerProvider { return typeof value === 'string' && RANKER_PROVIDER_ORDER.includes(value as RankerProvider) }
 function sourceProviderLabel(provider: SourceProvider) { switch (provider) { case 'commons': return 'Wikimedia Commons'; case 'wikipedia': return 'Wikipedia'; case 'google': return 'Google Images'; default: return 'Openverse' } }
