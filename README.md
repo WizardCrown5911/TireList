@@ -14,6 +14,8 @@ A full-stack tier-list builder with:
 - local AI image ranking
 - optional Gemini and Groq reranking
 - PNG export
+- Google sign-in dashboard for cloud-saved tier lists
+- favorites and sorting for saved lists
 - Render free-host deployment config
 
 ## How it works
@@ -24,6 +26,8 @@ When you ask the app to find images, the server:
 2. Uses a local CLIP model via Transformers.js to score the candidate images.
 3. Optionally reranks low-confidence matches with Gemini and then Groq if keys are configured.
 4. Falls back to metadata ranking if no model path is available.
+
+When you sign in with Google, the browser uses Firebase Authentication and Firestore to save tier list snapshots under your user ID.
 
 ## Setup
 
@@ -46,6 +50,12 @@ GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.5-flash
 GROQ_API_KEY=
 GROQ_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+VITE_FIREBASE_API_KEY=
+VITE_FIREBASE_AUTH_DOMAIN=
+VITE_FIREBASE_PROJECT_ID=
+VITE_FIREBASE_STORAGE_BUCKET=
+VITE_FIREBASE_MESSAGING_SENDER_ID=
+VITE_FIREBASE_APP_ID=
 ```
 
 3. Start the app:
@@ -68,6 +78,32 @@ To enable Google Images in the `Image APIs` dropdown:
 
 As of February 18, 2026, Google's official docs say the Custom Search JSON API is closed to new customers and existing customers have until January 1, 2027 to transition, so this Google source is best understood as an optional compatibility path for accounts that already have access.
 
+## Google sign-in dashboard setup
+
+The Dashboard page is optional. It appears in the app even without Firebase, but sign-in and cloud saves unlock after you add Firebase configuration.
+
+1. Create a Firebase project.
+2. Add a Web app in Firebase project settings.
+3. Enable Authentication with the Google provider.
+4. Create a Firestore database.
+5. Add your local and hosted domains to Firebase Authentication authorized domains.
+6. Set the `VITE_FIREBASE_*` variables from the Firebase web app config.
+
+Use Firestore rules like this so users can only read and write their own tier lists:
+
+```text
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId}/tierLists/{listId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
+```
+
+Cloud saves store the tier list snapshot in Firestore. Generated text images are compacted and rebuilt when a list opens; very large custom uploaded images may still make a list too large for Firestore, so export JSON for upload-heavy lists.
+
 ## Free hosting
 
 This repo now includes `render.yaml` for a Render web service deployment. It works with the current Express server and static build output, so you do not need to rewrite the app for serverless hosting.
@@ -79,6 +115,10 @@ ENABLE_LOCAL_CLIP=false
 GOOGLE_API_KEY=...
 GOOGLE_CSE_ID=...
 GEMINI_API_KEY=...
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+VITE_FIREBASE_APP_ID=...
 ```
 
 Disabling local CLIP on a free host avoids repeated model downloads on cold starts and keeps the app usable with Google Images plus Gemini/Groq or heuristic fallback.
@@ -110,6 +150,7 @@ That extra context is included in the image search request.
 - Gemini and Groq are optional hosted fallbacks for tougher matches. Their free tiers and rate limits can change over time.
 - PNG export may fail for some third-party remote images if the source blocks canvas use via CORS.
 - PNG export captures only the tier board, not the floating pool.
+- The dashboard can save, reopen, favorite, delete, and sort tier lists after Firebase Google sign-in is configured.
 - Each card now supports an image picker so users can manually choose from ranked candidate results.
 - Image matching uses local AI first, then optional hosted fallbacks, then heuristics across the public-source candidate set.
 - Lists can be exported to JSON and imported back later with images, tiers, placements, and compact mode preserved.

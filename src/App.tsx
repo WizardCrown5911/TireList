@@ -32,6 +32,20 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { toPng } from 'html-to-image'
+import {
+  deleteUserTierList,
+  getUserTierListSnapshot,
+  isFirebaseConfigured,
+  listUserTierLists,
+  saveUserTierList,
+  setUserTierListFavorite,
+  signInWithGoogle,
+  signOutOfGoogle,
+  subscribeToAuth,
+  type AuthUser,
+  type CloudTierListSnapshot,
+  type CloudTierListSummary,
+} from './firebaseClient'
 import './App.css'
 
 type NoticeTone = 'info' | 'success' | 'warning' | 'error'
@@ -53,6 +67,8 @@ type Notice = { message: string; tone: NoticeTone }
 type PickerState = { candidates: ImageResult[]; error: string; itemId: string | null; loading: boolean; query: string; recommendedId: string | null }
 type SuggestedItem = { context: string; id: string; name: string }
 type CountLabel = { plural: string; singular: string }
+type AppView = 'builder' | 'dashboard'
+type DashboardSort = 'updated-desc' | 'updated-asc' | 'title-asc' | 'favorites-first' | 'items-desc'
 type LaneProps = {
   color: string
   emptyMessage: string
@@ -81,6 +97,26 @@ type CardShellProps = {
   onToggleMenu?: (itemId: string) => void
   onUpload?: (itemId: string) => void
   overlay?: boolean
+}
+type DashboardViewProps = {
+  authLoading: boolean
+  cloudSaving: boolean
+  currentListId: string | null
+  error: string
+  firebaseConfigured: boolean
+  lists: CloudTierListSummary[]
+  loading: boolean
+  onBackToBuilder: () => void
+  onDelete: (listId: string) => void
+  onFavorite: (listId: string, favorite: boolean) => void
+  onOpen: (listId: string) => void
+  onRefresh: () => void
+  onSaveCurrent: () => void
+  onSignIn: () => void
+  onSignOut: () => void
+  onSortChange: (sort: DashboardSort) => void
+  sort: DashboardSort
+  user: AuthUser | null
 }
 
 const STORAGE_KEY = 'forge-tierlist:state:v1'
@@ -129,6 +165,8 @@ const DEFAULT_PROVIDER_SELECTION: ProviderSelection = {
 
 function App() {
   const [initialState] = useState<SavedState>(() => loadSavedState())
+  const firebaseConfigured = isFirebaseConfigured()
+  const [appView, setAppView] = useState<AppView>('builder')
   const [title, setTitle] = useState(initialState.title)
   const [listContext, setListContext] = useState(initialState.listContext)
   const [compactMode, setCompactMode] = useState(initialState.compactMode)
@@ -158,6 +196,14 @@ function App() {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [providerMenuOpen, setProviderMenuOpen] = useState(false)
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [authLoading, setAuthLoading] = useState(firebaseConfigured)
+  const [dashboardLists, setDashboardLists] = useState<CloudTierListSummary[]>([])
+  const [dashboardLoading, setDashboardLoading] = useState(false)
+  const [dashboardError, setDashboardError] = useState('')
+  const [dashboardSort, setDashboardSort] = useState<DashboardSort>('updated-desc')
+  const [cloudSaving, setCloudSaving] = useState(false)
+  const [currentCloudListId, setCurrentCloudListId] = useState<string | null>(null)
   const [pickerState, setPickerState] = useState<PickerState>({
     candidates: [],
     error: '',
@@ -183,6 +229,31 @@ function App() {
   useEffect(() => { providerSelectionRef.current = providerSelection }, [providerSelection])
   useEffect(() => { tierThemeRef.current = tierThemeId }, [tierThemeId])
   useEffect(() => { boardStateRef.current = board }, [board])
+  useEffect(() => {
+    if (!firebaseConfigured) {
+      setAuthLoading(false)
+      return
+    }
+
+    return subscribeToAuth((user) => {
+      setAuthUser(user)
+      setAuthLoading(false)
+      setDashboardError('')
+
+      if (user) {
+        setDashboardLoading(true)
+        void listUserTierLists(user.uid)
+          .then(setDashboardLists)
+          .catch((error) => {
+            setDashboardError(error instanceof Error ? error.message : 'Unable to load your saved tier lists.')
+          })
+          .finally(() => setDashboardLoading(false))
+      } else {
+        setDashboardLists([])
+        setCurrentCloudListId(null)
+      }
+    })
+  }, [firebaseConfigured])
   useEffect(() => {
     try {
       localStorage.setItem(
@@ -285,6 +356,7 @@ function App() {
   const existingItemKeys = new Set(Object.values(itemsById).map((item) => itemKeyFor(item.name, item.context)))
   const addableSuggestionCount = titleSuggestions.filter((item) => !existingItemKeys.has(itemKeyFor(item.name, item.context))).length
   const selectedAddableSuggestionCount = titleSuggestions.filter((item) => selectedSuggestionIds.includes(item.id) && !existingItemKeys.has(itemKeyFor(item.name, item.context))).length
+  const sortedDashboardLists = sortDashboardLists(dashboardLists, dashboardSort)
 
   function updateBoard(updater: (current: BoardState) => BoardState) {
     setBoard((current) => {
@@ -326,6 +398,33 @@ function App() {
     imageUploadRef.current?.click()
   }
 
+  function applySavedState(nextState: SavedState, cloudListId: string | null = null) {
+    const hydratedState = restoreGeneratedTextImages(nextState)
+    const nextProviderSelection = filterProviderSelection(hydratedState.providerSelection, providerAvailability)
+
+    setTitle(hydratedState.title)
+    setListContext(hydratedState.listContext)
+    setCompactMode(hydratedState.compactMode)
+    setSidebarCollapsed(hydratedState.sidebarCollapsed)
+    setProviderSelection(nextProviderSelection)
+    setTierThemeId(hydratedState.tierThemeId)
+    setTiers(hydratedState.tiers)
+    setItemsById(hydratedState.itemsById)
+    itemsRef.current = hydratedState.itemsById
+    boardStateRef.current = hydratedState.board
+    setBoard(hydratedState.board)
+    setCurrentCloudListId(cloudListId)
+    setMenuOpenId(null)
+    setProviderMenuOpen(false)
+    setThemeMenuOpen(false)
+    resetTierDragState()
+    setTitleSuggestions([])
+    setSelectedSuggestionIds([])
+    setSuggestionError('')
+    setManualItemsInput('')
+    closeImagePicker()
+  }
+
   function downloadListFile() {
     const snapshot = createSnapshot()
     const blob = new Blob([JSON.stringify(snapshot, null, 2)], {
@@ -351,26 +450,7 @@ function App() {
       const text = await file.text()
       const parsed = JSON.parse(text) as Partial<SavedState>
       const nextState = hydrateSavedState(parsed)
-      const nextProviderSelection = filterProviderSelection(nextState.providerSelection, providerAvailability)
-
-      setTitle(nextState.title)
-      setListContext(nextState.listContext)
-      setCompactMode(nextState.compactMode)
-      setSidebarCollapsed(nextState.sidebarCollapsed)
-      setProviderSelection(nextProviderSelection)
-      setTierThemeId(nextState.tierThemeId)
-      setTiers(nextState.tiers)
-      setItemsById(nextState.itemsById)
-      boardStateRef.current = nextState.board
-      setBoard(nextState.board)
-      setMenuOpenId(null)
-      setProviderMenuOpen(false)
-      setThemeMenuOpen(false)
-      setTitleSuggestions([])
-      setSelectedSuggestionIds([])
-      setSuggestionError('')
-      setManualItemsInput('')
-      closeImagePicker()
+      applySavedState(nextState)
       setNotice({
         message: `Imported "${nextState.title}" with ${Object.keys(nextState.itemsById).length} items.`,
         tone: 'success',
@@ -380,6 +460,192 @@ function App() {
         message: 'Import failed. Use a tier list JSON file exported from this app.',
         tone: 'error',
       })
+    }
+  }
+
+  async function refreshDashboardLists(user = authUser) {
+    if (!user || !firebaseConfigured) {
+      return
+    }
+
+    setDashboardLoading(true)
+    setDashboardError('')
+
+    try {
+      setDashboardLists(await listUserTierLists(user.uid))
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Unable to load your saved tier lists.'
+      setDashboardError(message)
+    } finally {
+      setDashboardLoading(false)
+    }
+  }
+
+  async function handleGoogleSignIn() {
+    if (!firebaseConfigured) {
+      setNotice({
+        message: 'Google sign-in is not configured yet. Add the VITE_FIREBASE_* variables to enable it.',
+        tone: 'warning',
+      })
+      setAppView('dashboard')
+      return
+    }
+
+    try {
+      await signInWithGoogle()
+      setNotice({ message: 'Signed in with Google.', tone: 'success' })
+      setAppView('dashboard')
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Google sign-in failed.'
+      setNotice({ message, tone: 'error' })
+      setDashboardError(message)
+    }
+  }
+
+  async function handleGoogleSignOut() {
+    try {
+      await signOutOfGoogle()
+      setNotice({ message: 'Signed out of Google.', tone: 'info' })
+    } catch (error) {
+      setNotice({
+        message: error instanceof Error ? error.message : 'Google sign-out failed.',
+        tone: 'error',
+      })
+    }
+  }
+
+  async function saveCurrentListToDashboard() {
+    if (!firebaseConfigured) {
+      setNotice({
+        message: 'Google sign-in is not configured yet. Add Firebase env vars before saving cloud lists.',
+        tone: 'warning',
+      })
+      setAppView('dashboard')
+      return
+    }
+
+    if (!authUser) {
+      setNotice({
+        message: 'Sign in with Google before saving this tier list to your dashboard.',
+        tone: 'warning',
+      })
+      setAppView('dashboard')
+      return
+    }
+
+    setCloudSaving(true)
+    setDashboardError('')
+
+    try {
+      const snapshot = prepareCloudSnapshot(createSnapshot())
+      const savedId = await saveUserTierList(authUser.uid, currentCloudListId, {
+        itemCount: Object.keys(itemsRef.current).length,
+        listContext: listContextRef.current,
+        snapshot,
+        tierCount: tiers.length,
+        title: title || 'Untitled tier list',
+      })
+
+      setCurrentCloudListId(savedId)
+      await refreshDashboardLists(authUser)
+      setNotice({
+        message: `Saved "${title || 'Untitled tier list'}" to your dashboard.`,
+        tone: 'success',
+      })
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Unable to save this tier list to your dashboard.'
+      setDashboardError(message)
+      setNotice({ message, tone: 'error' })
+    } finally {
+      setCloudSaving(false)
+    }
+  }
+
+  async function openDashboardList(listId: string) {
+    if (!authUser) {
+      return
+    }
+
+    setDashboardLoading(true)
+    setDashboardError('')
+
+    try {
+      const snapshot = await getUserTierListSnapshot(authUser.uid, listId)
+      const nextState = hydrateSavedState(snapshot as Partial<SavedState>)
+      applySavedState(nextState, listId)
+      setAppView('builder')
+      setNotice({
+        message: 'Loaded saved tier list from your dashboard.',
+        tone: 'success',
+      })
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Unable to open that saved tier list.'
+      setDashboardError(message)
+      setNotice({ message, tone: 'error' })
+    } finally {
+      setDashboardLoading(false)
+    }
+  }
+
+  async function toggleDashboardFavorite(listId: string, favorite: boolean) {
+    if (!authUser) {
+      return
+    }
+
+    setDashboardLists((current) =>
+      current.map((entry) =>
+        entry.id === listId ? { ...entry, favorite } : entry,
+      ),
+    )
+
+    try {
+      await setUserTierListFavorite(authUser.uid, listId, favorite)
+      await refreshDashboardLists(authUser)
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Unable to update that favorite.'
+      setDashboardError(message)
+      setNotice({ message, tone: 'error' })
+      await refreshDashboardLists(authUser)
+    }
+  }
+
+  async function deleteDashboardList(listId: string) {
+    if (!authUser) {
+      return
+    }
+
+    setDashboardLoading(true)
+    setDashboardError('')
+
+    try {
+      await deleteUserTierList(authUser.uid, listId)
+      if (currentCloudListId === listId) {
+        setCurrentCloudListId(null)
+      }
+      await refreshDashboardLists(authUser)
+      setNotice({ message: 'Deleted that saved tier list.', tone: 'success' })
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Unable to delete that saved tier list.'
+      setDashboardError(message)
+      setNotice({ message, tone: 'error' })
+    } finally {
+      setDashboardLoading(false)
     }
   }
 
@@ -1036,6 +1302,7 @@ function App() {
     boardStateRef.current = nextState.board
     setBoard(nextState.board)
     setActiveId(null)
+    setCurrentCloudListId(null)
     resetTierDragState()
     setMenuOpenId(null)
     setProviderMenuOpen(false)
@@ -1249,6 +1516,11 @@ function App() {
           <span className="eyebrow">Forge Tierlist</span>
           <h1>Build rankings with drag-and-drop cards and instant text images.</h1>
           <p>New text-based items use generated name artwork by default. You can still swap any card to searched public images with optional Google, Gemini, and Groq support.</p>
+          <div className="hero-actions">
+            <button className={`ghost-button ${appView === 'builder' ? 'ghost-button-active' : ''}`} onClick={() => setAppView('builder')} type="button">Builder</button>
+            <button className={`ghost-button ${appView === 'dashboard' ? 'ghost-button-active' : ''}`} onClick={() => { setAppView('dashboard'); if (authUser) void refreshDashboardLists(authUser) }} type="button">Dashboard</button>
+            {authUser ? <button className="ghost-button" onClick={() => void handleGoogleSignOut()} type="button">Sign out</button> : <button className="accent-button" disabled={authLoading} onClick={() => void handleGoogleSignIn()} type="button">{authLoading ? 'Checking sign-in...' : 'Sign in with Google'}</button>}
+          </div>
         </div>
         <div className="hero-stats">
           <Stat label="Items" value={String(Object.keys(itemsById).length)} />
@@ -1256,6 +1528,9 @@ function App() {
           <Stat label="Mode" value={lookupMode} />
         </div>
       </header>
+      {appView === 'dashboard' ? (
+        <DashboardView authLoading={authLoading} cloudSaving={cloudSaving} currentListId={currentCloudListId} error={dashboardError} firebaseConfigured={firebaseConfigured} lists={sortedDashboardLists} loading={dashboardLoading} onBackToBuilder={() => setAppView('builder')} onDelete={(listId) => { void deleteDashboardList(listId) }} onFavorite={(listId, favorite) => { void toggleDashboardFavorite(listId, favorite) }} onOpen={(listId) => { void openDashboardList(listId) }} onRefresh={() => { void refreshDashboardLists() }} onSaveCurrent={() => { void saveCurrentListToDashboard() }} onSignIn={() => { void handleGoogleSignIn() }} onSignOut={() => { void handleGoogleSignOut() }} onSortChange={setDashboardSort} sort={dashboardSort} user={authUser} />
+      ) : (
       <main className={`workspace ${sidebarCollapsed ? 'workspace-sidebar-collapsed' : ''}`}>
         <input accept=".json,application/json" className="visually-hidden" onChange={(event) => { void importListFile(event.currentTarget.files?.[0] || null); event.currentTarget.value = '' }} ref={importFileRef} type="file" />
         <input accept="image/png,image/jpeg,image/webp,image/gif,image/avif" className="visually-hidden" onChange={(event) => { void handleImageUploadSelection(event.currentTarget.files?.[0] || null); event.currentTarget.value = '' }} ref={imageUploadRef} type="file" />
@@ -1412,6 +1687,7 @@ function App() {
                 ) : null}
               </div>
               <button className={`ghost-button ${tierReorderEnabled ? 'ghost-button-active' : ''}`} onClick={toggleTierReorderMode} type="button">{tierReorderEnabled ? 'Done moving tiers' : 'Move tiers'}</button>
+              <button className="ghost-button" disabled={cloudSaving} onClick={() => { void saveCurrentListToDashboard() }} type="button">{cloudSaving ? 'Saving...' : currentCloudListId ? 'Update dashboard' : 'Save to dashboard'}</button>
               <button className="ghost-button" onClick={downloadListFile} type="button">Save list</button>
               <button className="ghost-button" onClick={openImportDialog} type="button">Import list</button>
               <button className={`ghost-button ${compactMode ? 'ghost-button-active' : ''}`} onClick={() => setCompactMode((current) => !current)} type="button">{compactMode ? 'Standard cards' : 'Compact mode'}</button>
@@ -1434,6 +1710,7 @@ function App() {
           </div>
         </section>
       </main>
+      )}
       {pickerItem ? <ImagePickerModal candidates={pickerState.candidates} currentImage={pickerItem.image} error={pickerState.error} item={pickerItem} loading={pickerState.loading} onChoose={(candidate) => chooseImageCandidate(pickerItem.id, candidate)} onClose={closeImagePicker} query={pickerState.query} recommendedId={pickerState.recommendedId} /> : null}
     </div>
   )
@@ -1445,6 +1722,111 @@ function Panel({ action, children, title }: { action?: ReactNode; children: Reac
 
 function Stat({ label, value }: { label: string; value: string }) {
   return <div className="stat-card"><span>{label}</span><strong>{value}</strong></div>
+}
+
+function DashboardView({ authLoading, cloudSaving, currentListId, error, firebaseConfigured, lists, loading, onBackToBuilder, onDelete, onFavorite, onOpen, onRefresh, onSaveCurrent, onSignIn, onSignOut, onSortChange, sort, user }: DashboardViewProps) {
+  if (!firebaseConfigured) {
+    return (
+      <main className="dashboard-page">
+        <section className="dashboard-panel dashboard-empty-panel">
+          <span className="eyebrow">Cloud Library</span>
+          <h2>Google sign-in is not configured yet.</h2>
+          <p>Add Firebase web app variables to your host to unlock the dashboard, saved tier lists, favorites, and sorting.</p>
+          <div className="dashboard-env-list">
+            <code>VITE_FIREBASE_API_KEY</code>
+            <code>VITE_FIREBASE_AUTH_DOMAIN</code>
+            <code>VITE_FIREBASE_PROJECT_ID</code>
+            <code>VITE_FIREBASE_APP_ID</code>
+          </div>
+          <button className="ghost-button" onClick={onBackToBuilder} type="button">Back to builder</button>
+        </section>
+      </main>
+    )
+  }
+
+  if (authLoading) {
+    return <main className="dashboard-page"><section className="dashboard-panel dashboard-empty-panel">Checking your Google sign-in...</section></main>
+  }
+
+  if (!user) {
+    return (
+      <main className="dashboard-page">
+        <section className="dashboard-panel dashboard-empty-panel">
+          <span className="eyebrow">My Lists</span>
+          <h2>Sign in to save and favorite tier lists.</h2>
+          <p>Your dashboard keeps tier lists under your Google account so you can reopen them later.</p>
+          <div className="button-row">
+            <button className="accent-button" onClick={onSignIn} type="button">Sign in with Google</button>
+            <button className="ghost-button" onClick={onBackToBuilder} type="button">Back to builder</button>
+          </div>
+          {error ? <p className="dashboard-error">{error}</p> : null}
+        </section>
+      </main>
+    )
+  }
+
+  return (
+    <main className="dashboard-page">
+      <section className="dashboard-panel">
+        <div className="dashboard-header">
+          <div>
+            <span className="eyebrow">My Lists</span>
+            <h2>{user.displayName}'s dashboard</h2>
+            <p>Save the current board, reopen old tier lists, favorite your best ones, and sort the library.</p>
+          </div>
+          <div className="dashboard-account">
+            {user.photoURL ? <img alt="" src={user.photoURL} /> : null}
+            <span>{user.email}</span>
+            <button className="ghost-button" onClick={onSignOut} type="button">Sign out</button>
+          </div>
+        </div>
+        <div className="dashboard-toolbar">
+          <button className="accent-button" disabled={cloudSaving} onClick={onSaveCurrent} type="button">{cloudSaving ? 'Saving...' : currentListId ? 'Update saved list' : 'Save current list'}</button>
+          <button className="ghost-button" disabled={loading} onClick={onRefresh} type="button">{loading ? 'Refreshing...' : 'Refresh'}</button>
+          <button className="ghost-button" onClick={onBackToBuilder} type="button">Back to builder</button>
+          <label className="dashboard-sort">
+            <span>Sort by</span>
+            <select onChange={(event) => onSortChange(event.target.value as DashboardSort)} value={sort}>
+              <option value="updated-desc">Recently updated</option>
+              <option value="updated-asc">Oldest updated</option>
+              <option value="title-asc">Title A-Z</option>
+              <option value="favorites-first">Favorites first</option>
+              <option value="items-desc">Most items</option>
+            </select>
+          </label>
+        </div>
+        {error ? <p className="dashboard-error">{error}</p> : null}
+        {lists.length ? (
+          <div className="dashboard-grid">
+            {lists.map((list) => (
+              <article className={`dashboard-card ${currentListId === list.id ? 'dashboard-card-current' : ''}`} key={list.id}>
+                <div className="dashboard-card-top">
+                  <span>{list.favorite ? 'Favorite' : 'Saved'}</span>
+                  <button className={`favorite-button ${list.favorite ? 'favorite-button-active' : ''}`} onClick={() => onFavorite(list.id, !list.favorite)} type="button">{list.favorite ? 'Unfavorite' : 'Favorite'}</button>
+                </div>
+                <h3>{list.title}</h3>
+                {list.listContext ? <p>{list.listContext}</p> : <p>No extra context saved.</p>}
+                <div className="dashboard-card-meta">
+                  <span>{list.itemCount} item{list.itemCount === 1 ? '' : 's'}</span>
+                  <span>{list.tierCount} tier{list.tierCount === 1 ? '' : 's'}</span>
+                  <span>{formatDashboardDate(list.updatedAtMillis)}</span>
+                </div>
+                <div className="dashboard-card-actions">
+                  <button className="accent-button" onClick={() => onOpen(list.id)} type="button">Open</button>
+                  <button className="ghost-button ghost-button-danger" onClick={() => onDelete(list.id)} type="button">Delete</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="dashboard-empty-state">
+            <strong>No saved tier lists yet.</strong>
+            <span>Go back to the builder and save the current list when it is ready.</span>
+          </div>
+        )}
+      </section>
+    </main>
+  )
 }
 
 function TierEditorHeader({ dragging = false, dropTarget = false, onColorChange, onDragEnd, onDragOver, onDragStart, onDrop, onLabelChange, onRemove, reorderEnabled, removable, tier }: { dragging?: boolean; dropTarget?: boolean; onColorChange: (value: string) => void; onDragEnd: () => void; onDragOver: (event: React.DragEvent<HTMLElement>) => void; onDragStart: (event: React.DragEvent<HTMLElement>) => void; onDrop: (event: React.DragEvent<HTMLElement>) => void; onLabelChange: (value: string) => void; onRemove: () => void; reorderEnabled: boolean; removable: boolean; tier: TierConfig }) {
@@ -1720,6 +2102,56 @@ function hydrateSavedState(parsed: Partial<SavedState> | null | undefined): Save
     title: typeof parsed?.title === 'string' ? parsed.title : baseState.title,
     tiers,
   }
+}
+
+function prepareCloudSnapshot(snapshot: SavedState): CloudTierListSnapshot {
+  const compactSnapshot: SavedState = {
+    ...snapshot,
+    itemsById: Object.fromEntries(
+      Object.entries(snapshot.itemsById).map(([id, item]) => [
+        id,
+        item.image?.matchMethod === 'text-image'
+          ? { ...item, image: { ...item.image, previewUrl: '' } }
+          : item,
+      ]),
+    ),
+  }
+  const encoded = JSON.stringify(compactSnapshot)
+
+  if (encoded.length > 900_000) {
+    throw new Error('This tier list is too large for the cloud dashboard, usually because it contains big uploaded images. Export it as JSON or replace large uploads before saving.')
+  }
+
+  return JSON.parse(encoded) as CloudTierListSnapshot
+}
+
+function restoreGeneratedTextImages(state: SavedState): SavedState {
+  let changed = false
+  const itemsById = Object.fromEntries(
+    Object.entries(state.itemsById).map(([id, item]) => {
+      if (item.image?.matchMethod !== 'text-image' || item.image.previewUrl) {
+        return [id, item]
+      }
+
+      try {
+        const previewUrl = createTextImageDataUrl(item)
+        changed = true
+        return [
+          id,
+          {
+            ...item,
+            image: createTextImageResult(item, previewUrl),
+            imageError: '',
+            imageStatus: 'ready' as const,
+          },
+        ]
+      } catch {
+        return [id, item]
+      }
+    }),
+  )
+
+  return changed ? { ...state, itemsById } : state
 }
 
 function loadSavedState(): SavedState {
@@ -2311,6 +2743,31 @@ function sourceProviderDescription(provider: SourceProvider, disabled = false) {
 function rankerProviderLabel(provider: RankerProvider) { switch (provider) { case 'local': return 'Local CLIP'; case 'gemini': return 'Gemini'; default: return 'Groq' } }
 function rankerProviderDescription(provider: RankerProvider, disabled = false) { if (disabled) return provider === 'local' ? 'Disabled on this server.' : provider === 'gemini' ? 'Unavailable until GEMINI_API_KEY is set.' : 'Unavailable until GROQ_API_KEY is set.'; switch (provider) { case 'local': return 'Runs on-device before any hosted fallback.'; case 'gemini': return 'Hosted multimodal reranker for harder matches.'; default: return 'Hosted fallback reranker after public image search.' } }
 function selectionSummary(selection: ProviderSelection) { return `${selection.sources.length === SOURCE_PROVIDER_ORDER.length ? 'All sources' : selection.sources.map(sourceProviderLabel).join(' + ')} / ${selection.rankers.length === RANKER_PROVIDER_ORDER.length ? 'Auto AI' : selection.rankers.length ? selection.rankers.map(rankerProviderLabel).join(' + ') : 'Heuristic only'}` }
+
+function sortDashboardLists(lists: CloudTierListSummary[], sort: DashboardSort) {
+  return [...lists].sort((left, right) => {
+    switch (sort) {
+      case 'updated-asc':
+        return left.updatedAtMillis - right.updatedAtMillis
+      case 'title-asc':
+        return left.title.localeCompare(right.title)
+      case 'favorites-first':
+        return Number(right.favorite) - Number(left.favorite) || right.updatedAtMillis - left.updatedAtMillis
+      case 'items-desc':
+        return right.itemCount - left.itemCount || right.updatedAtMillis - left.updatedAtMillis
+      default:
+        return right.updatedAtMillis - left.updatedAtMillis
+    }
+  })
+}
+
+function formatDashboardDate(value: number) {
+  if (!value) return 'Never updated'
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value))
+}
 
 function waitForNextPaint() {
   return new Promise<void>((resolve) => {
