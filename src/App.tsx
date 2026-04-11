@@ -144,7 +144,7 @@ function App() {
   const [suggestionError, setSuggestionError] = useState('')
   const [manualItemsInput, setManualItemsInput] = useState('')
   const [notice, setNotice] = useState<Notice>({
-    message: 'Set a list title, generate related items, or add your own items to the pool and let the matcher pick images.',
+    message: 'Set a list title, generate related items, or add your own items to the pool. New text-based items start with generated text images by default.',
     tone: 'info',
   })
   const [backendReady, setBackendReady] = useState<boolean | null>(null)
@@ -153,7 +153,6 @@ function App() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [draggingTierId, setDraggingTierId] = useState<string | null>(null)
   const [tierDropTargetId, setTierDropTargetId] = useState<string | null>(null)
-  const [autoPickingItems, setAutoPickingItems] = useState(false)
   const [bulkRunning, setBulkRunning] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [providerMenuOpen, setProviderMenuOpen] = useState(false)
@@ -479,9 +478,31 @@ function App() {
       return
     }
 
+    let textImageFailures = 0
     const nextEntries = uniqueEntries.map((entry) => {
       const id = createId('item')
-      return [id, { context: entry.context.trim(), id, imageStatus: 'idle' as const, name: entry.name.trim(), tierId: null }] as const
+      const item: TierItem = {
+        context: entry.context.trim(),
+        id,
+        imageStatus: 'idle',
+        name: entry.name.trim(),
+        tierId: null,
+      }
+
+      try {
+        const previewUrl = createTextImageDataUrl(item)
+        item.image = createTextImageResult(item, previewUrl)
+        item.imageStatus = 'ready'
+      } catch (error) {
+        textImageFailures += 1
+        item.imageError =
+          error instanceof Error
+            ? error.message
+            : `Unable to generate a text image for ${item.name}.`
+        item.imageStatus = 'error'
+      }
+
+      return [id, item] as const
     })
     const nextItems = Object.fromEntries(nextEntries)
     const nextIds = nextEntries.map(([id]) => id)
@@ -493,19 +514,12 @@ function App() {
     })
     updateBoard((current) => ({ ...current, [POOL_ID]: [...getContainerItems(current, POOL_ID), ...nextIds] }))
 
-    if (backendReady === false) {
-      setNotice({
-        message: `Added ${nextIds.length} ${formatCountLabel(nextIds.length, sourceLabel)} to the pool. The backend is offline, so images were not auto-picked.`,
-        tone: 'warning',
-      })
-      return
-    }
-
     setNotice({
-      message: `Added ${nextIds.length} ${formatCountLabel(nextIds.length, sourceLabel)} to the pool. Auto-picking images now...`,
-      tone: 'info',
+      message: textImageFailures
+        ? `Added ${nextIds.length} ${formatCountLabel(nextIds.length, sourceLabel)} to the pool. ${nextIds.length - textImageFailures} text image${nextIds.length - textImageFailures === 1 ? '' : 's'} generated and ${textImageFailures} need manual images.`
+        : `Added ${nextIds.length} ${formatCountLabel(nextIds.length, sourceLabel)} to the pool with text images. Use image search whenever you want real pictures instead.`,
+      tone: textImageFailures ? 'warning' : 'success',
     })
-    void autoLookupNewItems(nextIds)
   }
 
   function addSuggestedItems(mode: 'all' | 'selected') {
@@ -965,38 +979,6 @@ function App() {
     setNotice({ message: 'Image matching finished across the active matcher stack.', tone: 'success' })
   }
 
-  async function autoLookupNewItems(itemIds: string[]) {
-    if (!itemIds.length || backendReady === false) {
-      return
-    }
-
-    setAutoPickingItems(true)
-    let cursor = 0
-    let matched = 0
-    let failed = 0
-    const concurrency = Math.min(3, itemIds.length)
-
-    try {
-      async function worker() {
-        while (cursor < itemIds.length) {
-          const itemId = itemIds[cursor]
-          cursor += 1
-          const ok = await lookupImageForItem(itemId, true)
-          if (ok) matched += 1
-          else failed += 1
-        }
-      }
-
-      await Promise.all(Array.from({ length: concurrency }, () => worker()))
-      setNotice({
-        message: failed ? `Added ${itemIds.length} items. Auto-picked ${matched} image${matched === 1 ? '' : 's'} and left ${failed} for manual review.` : `Added ${itemIds.length} item${itemIds.length === 1 ? '' : 's'} and auto-picked image${itemIds.length === 1 ? '' : 's'}.`,
-        tone: failed ? 'warning' : 'success',
-      })
-    } finally {
-      setAutoPickingItems(false)
-    }
-  }
-
   async function captureBoardImage() {
     if (!boardExportRef.current) {
       throw new Error('The tier board is not ready to export yet.')
@@ -1256,8 +1238,8 @@ function App() {
       <header className="hero-panel">
         <div className="hero-copy">
           <span className="eyebrow">Forge Tierlist</span>
-          <h1>Build rankings with drag-and-drop cards and auto-picked images.</h1>
-          <p>The app searches public image sources with optional Google Images, then uses local AI first with optional Gemini and Groq reranking for tougher matches.</p>
+          <h1>Build rankings with drag-and-drop cards and instant text images.</h1>
+          <p>New text-based items use generated name artwork by default. You can still swap any card to searched public images with optional Google, Gemini, and Groq support.</p>
         </div>
         <div className="hero-stats">
           <Stat label="Items" value={String(Object.keys(itemsById).length)} />
@@ -1334,8 +1316,8 @@ function App() {
                     <div className={`finder-state ${suggestionError ? 'finder-state-error' : ''}`}>{suggestionError || 'Set a title, then generate a batch of related items to review before adding them.'}</div>
                   )}
                   <div className="button-row">
-                    <button className="accent-button" disabled={bulkRunning || autoPickingItems || !Object.keys(itemsById).length} onClick={() => { void lookupAllImages() }} type="button">{bulkRunning || autoPickingItems ? 'Matching images...' : 'Find images for all'}</button>
-                    <button className="ghost-button" disabled={bulkRunning || autoPickingItems || !Object.keys(itemsById).length} onClick={generateTextImagesForAll} type="button">Generate text images</button>
+                    <button className="accent-button" disabled={bulkRunning || !Object.keys(itemsById).length} onClick={() => { void lookupAllImages() }} type="button">{bulkRunning ? 'Matching images...' : 'Find images for all'}</button>
+                    <button className="ghost-button" disabled={bulkRunning || !Object.keys(itemsById).length} onClick={generateTextImagesForAll} type="button">Regenerate text images</button>
                   </div>
                 </Panel>
                 <div className={`notice notice-${notice.tone}`}><strong>{backendReady === false ? 'Backend offline.' : 'Status.'}</strong><span>{notice.message}</span></div>
