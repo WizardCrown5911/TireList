@@ -16,6 +16,7 @@ A full-stack tier-list builder with:
 - PNG export
 - Google sign-in dashboard for cloud-saved tier lists
 - favorites and sorting for saved lists
+- optional AdSense banner and rail placements
 - Render free-host deployment config
 
 ## How it works
@@ -56,6 +57,10 @@ VITE_FIREBASE_PROJECT_ID=
 VITE_FIREBASE_STORAGE_BUCKET=
 VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
+VITE_ADSENSE_CLIENT=
+VITE_ADSENSE_TOP_SLOT=
+VITE_ADSENSE_SIDEBAR_SLOT=
+VITE_ADSENSE_DASHBOARD_SLOT=
 ```
 
 3. Start the app:
@@ -104,6 +109,25 @@ service cloud.firestore {
 
 Cloud saves store the tier list snapshot in Firestore. Generated text images are compacted and rebuilt when a list opens; very large custom uploaded images may still make a list too large for Firestore, so export JSON for upload-heavy lists.
 
+## AdSense setup
+
+AdSense is optional and only renders if you set the `VITE_ADSENSE_*` variables.
+
+1. Create or use an AdSense account and get your publisher ID in the form `ca-pub-...`.
+2. Create ad units for:
+   - the top banner
+   - the sidebar rail
+   - the dashboard banner
+3. Set:
+   - `VITE_ADSENSE_CLIENT`
+   - `VITE_ADSENSE_TOP_SLOT`
+   - `VITE_ADSENSE_SIDEBAR_SLOT`
+   - `VITE_ADSENSE_DASHBOARD_SLOT`
+4. Copy [ads.txt.template](public/ads.txt.template) to `public/ads.txt` and replace `pub-XXXXXXXXXXXXXXXX` with your real publisher ID.
+5. Redeploy the site.
+
+The app loads the AdSense script only when a client ID is configured and keeps ads outside the draggable tier board so the builder layout stays usable.
+
 ## Free hosting
 
 This repo now includes `render.yaml` for a Render web service deployment. It works with the current Express server and static build output, so you do not need to rewrite the app for serverless hosting.
@@ -119,6 +143,10 @@ VITE_FIREBASE_API_KEY=...
 VITE_FIREBASE_AUTH_DOMAIN=...
 VITE_FIREBASE_PROJECT_ID=...
 VITE_FIREBASE_APP_ID=...
+VITE_ADSENSE_CLIENT=ca-pub-...
+VITE_ADSENSE_TOP_SLOT=...
+VITE_ADSENSE_SIDEBAR_SLOT=...
+VITE_ADSENSE_DASHBOARD_SLOT=...
 ```
 
 Disabling local CLIP on a free host avoids repeated model downloads on cold starts and keeps the app usable with Google Images plus Gemini/Groq or heuristic fallback.
@@ -150,6 +178,7 @@ That extra context is included in the image search request.
 - Gemini and Groq are optional hosted fallbacks for tougher matches. Their free tiers and rate limits can change over time.
 - PNG export may fail for some third-party remote images if the source blocks canvas use via CORS.
 - PNG export captures only the tier board, not the floating pool.
+- AdSense placements sit below the hero, in the sidebar rail, and in the dashboard instead of inside draggable tier rows.
 - The dashboard can save, reopen, favorite, delete, and sort tier lists after Firebase Google sign-in is configured.
 - Each card now supports an image picker so users can manually choose from ranked candidate results.
 - Image matching uses local AI first, then optional hosted fallbacks, then heuristics across the public-source candidate set.

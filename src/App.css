@@ -98,6 +98,49 @@
   margin-top: 4px;
 }
 
+.ad-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(88, 111, 172, 0.24);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(9, 15, 31, 0.92), rgba(6, 11, 24, 0.9));
+  box-shadow: var(--shadow);
+}
+
+.ad-shell-banner {
+  margin-top: -8px;
+}
+
+.ad-shell-rail {
+  margin-top: 2px;
+}
+
+.ad-shell-dashboard {
+  margin-bottom: 18px;
+}
+
+.ad-shell-label {
+  color: #89adf0;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.ad-slot {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 16px;
+}
+
+.ad-shell-error {
+  color: #ffadbe;
+  font-size: 0.76rem;
+}
+
 .hero-stats {
   position: relative;
   z-index: 1;

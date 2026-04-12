@@ -46,6 +46,7 @@ import {
   type CloudTierListSnapshot,
   type CloudTierListSummary,
 } from './firebaseClient'
+import { AdSlot } from './AdSlot'
 import './App.css'
 
 type NoticeTone = 'info' | 'success' | 'warning' | 'error'
@@ -162,6 +163,9 @@ const DEFAULT_PROVIDER_SELECTION: ProviderSelection = {
   rankers: ['gemini'],
   sources: ['openverse'],
 }
+const ADSENSE_TOP_SLOT = (import.meta.env.VITE_ADSENSE_TOP_SLOT || '').trim()
+const ADSENSE_SIDEBAR_SLOT = (import.meta.env.VITE_ADSENSE_SIDEBAR_SLOT || '').trim()
+const ADSENSE_DASHBOARD_SLOT = (import.meta.env.VITE_ADSENSE_DASHBOARD_SLOT || '').trim()
 
 function App() {
   const [initialState] = useState<SavedState>(() => loadSavedState())
@@ -1528,6 +1532,7 @@ function App() {
           <Stat label="Mode" value={lookupMode} />
         </div>
       </header>
+      {ADSENSE_TOP_SLOT ? <AdSlot className="ad-shell-banner" label="Sponsored" minHeight={96} slot={ADSENSE_TOP_SLOT} /> : null}
       {appView === 'dashboard' ? (
         <DashboardView authLoading={authLoading} cloudSaving={cloudSaving} currentListId={currentCloudListId} error={dashboardError} firebaseConfigured={firebaseConfigured} lists={sortedDashboardLists} loading={dashboardLoading} onBackToBuilder={() => setAppView('builder')} onDelete={(listId) => { void deleteDashboardList(listId) }} onFavorite={(listId, favorite) => { void toggleDashboardFavorite(listId, favorite) }} onOpen={(listId) => { void openDashboardList(listId) }} onRefresh={() => { void refreshDashboardLists() }} onSaveCurrent={() => { void saveCurrentListToDashboard() }} onSignIn={() => { void handleGoogleSignIn() }} onSignOut={() => { void handleGoogleSignOut() }} onSortChange={setDashboardSort} sort={dashboardSort} user={authUser} />
       ) : (
@@ -1606,6 +1611,7 @@ function App() {
                 </Panel>
                 <div className={`notice notice-${notice.tone}`}><strong>{backendReady === false ? 'Backend offline.' : 'Status.'}</strong><span>{notice.message}</span></div>
                 <div className="meta-card"><p>Current image APIs: {selectionSummary(providerSelection)}.</p><p>Choose sources and AI rerankers from the `Image APIs` dropdown. With no AI rankers selected, the app falls back to metadata-only matching.</p></div>
+                {ADSENSE_SIDEBAR_SLOT ? <AdSlot className="ad-shell-rail" format="rectangle" label="Sponsored" minHeight={260} slot={ADSENSE_SIDEBAR_SLOT} /> : null}
               </div>
             </div>
           )}
@@ -1795,6 +1801,7 @@ function DashboardView({ authLoading, cloudSaving, currentListId, error, firebas
             </select>
           </label>
         </div>
+        {ADSENSE_DASHBOARD_SLOT ? <AdSlot className="ad-shell-dashboard" label="Sponsored" minHeight={110} slot={ADSENSE_DASHBOARD_SLOT} /> : null}
         {error ? <p className="dashboard-error">{error}</p> : null}
         {lists.length ? (
           <div className="dashboard-grid">

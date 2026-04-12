@@ -31,3 +31,11 @@ services:
         sync: false
       - key: VITE_FIREBASE_APP_ID
         sync: false
+      - key: VITE_ADSENSE_CLIENT
+        sync: false
+      - key: VITE_ADSENSE_TOP_SLOT
+        sync: false
+      - key: VITE_ADSENSE_SIDEBAR_SLOT
+        sync: false
+      - key: VITE_ADSENSE_DASHBOARD_SLOT
+        sync: false
