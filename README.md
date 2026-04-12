@@ -123,7 +123,7 @@ AdSense is optional and only renders if you set the `VITE_ADSENSE_*` variables.
    - `VITE_ADSENSE_TOP_SLOT`
    - `VITE_ADSENSE_SIDEBAR_SLOT`
    - `VITE_ADSENSE_DASHBOARD_SLOT`
-4. Copy [ads.txt.template](public/ads.txt.template) to `public/ads.txt` and replace `pub-XXXXXXXXXXXXXXXX` with your real publisher ID.
+4. Put your publisher line in [ads.txt](public/ads.txt) and replace `pub-XXXXXXXXXXXXXXXX` with your real publisher ID.
 5. Redeploy the site.
 
 The app loads the AdSense script only when a client ID is configured and keeps ads outside the draggable tier board so the builder layout stays usable.
