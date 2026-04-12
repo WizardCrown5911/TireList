@@ -1710,6 +1710,46 @@
   color: #ffadbe;
 }
 
+.card-menu-color {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(85, 109, 168, 0.24);
+  border-radius: 12px;
+  background: rgba(9, 16, 34, 0.94);
+  color: #d6e4ff;
+  font-size: 0.76rem;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.card-menu-color:hover {
+  transform: translateY(-1px);
+  border-color: rgba(115, 145, 214, 0.42);
+  background: rgba(13, 24, 47, 0.96);
+}
+
+.card-menu-color span {
+  line-height: 1.3;
+}
+
+.card-menu-color input {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(133, 167, 255, 0.28);
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+}
+
 .picker-overlay {
   position: fixed;
   inset: 0;
@@ -1943,6 +1983,17 @@
 .board-surface-compact .card-menu a {
   padding: 8px 10px;
   font-size: 0.68rem;
+}
+
+.board-surface-compact .card-menu-color {
+  padding: 8px 10px;
+  font-size: 0.68rem;
+}
+
+.board-surface-compact .card-menu-color input {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
 }
 
 .board-surface-compact .card-menu-trigger {

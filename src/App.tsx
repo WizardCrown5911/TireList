@@ -57,7 +57,7 @@ type MatchMethod = 'heuristic' | 'local-ai' | 'gemini' | 'groq' | 'manual' | 'te
 type SourceProvider = 'commons' | 'wikipedia' | 'openverse' | 'google'
 type RankerProvider = 'local' | 'gemini' | 'groq'
 type ImageResult = { attribution: string; confidence: number; creator: string; id: string; license: string; matchMethod: MatchMethod; previewUrl: string; provider: string; reason: string; sourceUrl: string; title: string }
-type TierItem = { context: string; id: string; image?: ImageResult; imageError?: string; imageStatus: ImageStatus; name: string; tierId: string | null }
+type TierItem = { context: string; id: string; image?: ImageResult; imageError?: string; imageStatus: ImageStatus; name: string; textBackground?: string; tierId: string | null }
 type TierConfig = { color: string; id: string; label: string }
 type BoardState = Record<string, string[]>
 type ProviderSelection = { rankers: RankerProvider[]; sources: SourceProvider[] }
@@ -82,10 +82,9 @@ type LaneProps = {
   menuOpenId: string | null
   onDropFiles?: (files: FileList | null) => void
   onDropImage: (itemId: string, files: FileList | null) => void
-  onGenerateTextImage: (itemId: string) => void
-  onLookup: (itemId: string) => void
   onOpenPicker: (itemId: string) => void
   onRemove: (itemId: string) => void
+  onSetTextBackground: (itemId: string, color: string) => void
   onToggleMenu: (itemId: string) => void
   onUpload: (itemId: string) => void
 }
@@ -93,10 +92,9 @@ type CardShellProps = {
   item: TierItem
   menuOpen?: boolean
   onDropImage?: (itemId: string, files: FileList | null) => void
-  onGenerateTextImage?: (itemId: string) => void
-  onLookup?: (itemId: string) => void
   onOpenPicker?: (itemId: string) => void
   onRemove?: (itemId: string) => void
+  onSetTextBackground?: (itemId: string, color: string) => void
   onToggleMenu?: (itemId: string) => void
   onUpload?: (itemId: string) => void
   overlay?: boolean
@@ -1067,6 +1065,41 @@ function App() {
     }
   }
 
+  function setTextBackgroundColorForItem(itemId: string, color: string) {
+    const item = itemsRef.current[itemId]
+    const normalizedColor = normalizeHexColor(color)
+
+    if (!item || !normalizedColor) {
+      return false
+    }
+
+    const nextItem = { ...item, textBackground: normalizedColor }
+
+    try {
+      const previewUrl = createTextImageDataUrl(nextItem)
+      patchItem(itemId, {
+        image: createTextImageResult(nextItem, previewUrl),
+        imageError: '',
+        imageStatus: 'ready',
+        textBackground: normalizedColor,
+      })
+      setMenuOpenId(null)
+      setNotice({
+        message: `${item.name} now uses a text image with the updated background color.`,
+        tone: 'success',
+      })
+      return true
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : `Unable to update the text background for ${item.name}.`
+      patchItem(itemId, { imageError: message, imageStatus: 'error', textBackground: normalizedColor })
+      setNotice({ message, tone: 'error' })
+      return false
+    }
+  }
+
   function generateTextImagesForAll() {
     const itemIds = Object.keys(itemsRef.current)
 
@@ -1746,12 +1779,12 @@ function App() {
             <DndContext collisionDetection={collisionDetectionStrategy} onDragCancel={handleDragCancel} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragStart={handleDragStart} sensors={sensors}>
               <div className="board-shell" ref={boardExportRef}>
                 {tiers.map((tier) => (
-                  <TierLane color={tier.color} emptyMessage={`Drop cards into ${tier.label}.`} header={<TierEditorHeader dropTarget={Boolean(draggingTierId) && tierDropTargetId === tier.id && draggingTierId !== tier.id} onColorChange={(value) => updateTier(tier.id, 'color', value)} onDragEnd={resetTierDragState} onDragOver={(event) => handleTierHeaderDragOver(event, tier.id)} onDragStart={(event) => handleTierHeaderDragStart(event, tier.id)} onDrop={(event) => handleTierHeaderDrop(event, tier.id)} onLabelChange={(value) => updateTier(tier.id, 'label', value)} onRemove={() => removeTier(tier.id)} reorderEnabled={tierReorderEnabled} removable={tiers.length > 1} tier={tier} dragging={draggingTierId === tier.id} />} id={tier.id} items={mapIdsToItems(board[tier.id] || [], itemsById)} key={tier.id} menuOpenId={menuOpenId} onDropImage={handleImageDrop} onGenerateTextImage={generateTextImageForItem} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} />
+                  <TierLane color={tier.color} emptyMessage={`Drop cards into ${tier.label}.`} header={<TierEditorHeader dropTarget={Boolean(draggingTierId) && tierDropTargetId === tier.id && draggingTierId !== tier.id} onColorChange={(value) => updateTier(tier.id, 'color', value)} onDragEnd={resetTierDragState} onDragOver={(event) => handleTierHeaderDragOver(event, tier.id)} onDragStart={(event) => handleTierHeaderDragStart(event, tier.id)} onDrop={(event) => handleTierHeaderDrop(event, tier.id)} onLabelChange={(value) => updateTier(tier.id, 'label', value)} onRemove={() => removeTier(tier.id)} reorderEnabled={tierReorderEnabled} removable={tiers.length > 1} tier={tier} dragging={draggingTierId === tier.id} />} id={tier.id} items={mapIdsToItems(board[tier.id] || [], itemsById)} key={tier.id} menuOpenId={menuOpenId} onDropImage={handleImageDrop} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onSetTextBackground={setTextBackgroundColorForItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} />
                 ))}
                 <button className="lane-add-button" onClick={addTier} type="button">Add tier underneath</button>
               </div>
               <div className="pool-island-wrap">
-                <TierLane color="#7a808e" emptyMessage="Drop cards here or drop image files to create new items." header={<div className="lane-label-basic"><span className="lane-label-title">Pool</span><strong className="lane-label-count">{poolItems.length}</strong></div>} id={POOL_ID} isPool items={poolItems} menuOpenId={menuOpenId} onDropFiles={(files) => { void addDroppedImagesToPool(files) }} onDropImage={handleImageDrop} onGenerateTextImage={generateTextImageForItem} onLookup={(itemId) => { void lookupImageForItem(itemId) }} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} />
+                <TierLane color="#7a808e" emptyMessage="Drop cards here or drop image files to create new items." header={<div className="lane-label-basic"><span className="lane-label-title">Pool</span><strong className="lane-label-count">{poolItems.length}</strong></div>} id={POOL_ID} isPool items={poolItems} menuOpenId={menuOpenId} onDropFiles={(files) => { void addDroppedImagesToPool(files) }} onDropImage={handleImageDrop} onOpenPicker={(itemId) => { void openImagePicker(itemId) }} onRemove={removeItem} onSetTextBackground={setTextBackgroundColorForItem} onToggleMenu={(itemId) => setMenuOpenId((current) => current === itemId ? null : itemId)} onUpload={openImageUploadDialog} />
               </div>
               <DragOverlay>{activeItem ? <CardShell item={activeItem} overlay /> : null}</DragOverlay>
             </DndContext>
@@ -1928,7 +1961,7 @@ function TierLabelEditor({ label, onChange }: { label: string; onChange: (value:
   )
 }
 
-function TierLane({ color, emptyMessage, header, id, isPool = false, items, menuOpenId, onDropFiles, onDropImage, onGenerateTextImage, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload }: LaneProps) {
+function TierLane({ color, emptyMessage, header, id, isPool = false, items, menuOpenId, onDropFiles, onDropImage, onOpenPicker, onRemove, onSetTextBackground, onToggleMenu, onUpload }: LaneProps) {
   const { isOver, setNodeRef } = useDroppable({ id })
   const [isFileOver, setIsFileOver] = useState(false)
   const fileDragDepthRef = useRef(0)
@@ -1988,7 +2021,7 @@ function TierLane({ color, emptyMessage, header, id, isPool = false, items, menu
       <div className="lane-label">{header}</div>
       <SortableContext items={items.map((item) => item.id)} strategy={rectSortingStrategy}>
         <div className="lane-grid">
-          {items.map((item) => <SortableCard item={item} key={item.id} menuOpen={menuOpenId === item.id} onDropImage={onDropImage} onGenerateTextImage={onGenerateTextImage} onLookup={onLookup} onOpenPicker={onOpenPicker} onRemove={onRemove} onToggleMenu={onToggleMenu} onUpload={onUpload} />)}
+          {items.map((item) => <SortableCard item={item} key={item.id} menuOpen={menuOpenId === item.id} onDropImage={onDropImage} onOpenPicker={onOpenPicker} onRemove={onRemove} onSetTextBackground={onSetTextBackground} onToggleMenu={onToggleMenu} onUpload={onUpload} />)}
           {!items.length ? <div className="lane-empty">{emptyMessage}</div> : null}
         </div>
       </SortableContext>
@@ -1997,12 +2030,12 @@ function TierLane({ color, emptyMessage, header, id, isPool = false, items, menu
   )
 }
 
-function SortableCard({ item, menuOpen = false, onDropImage, onGenerateTextImage, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload }: { item: TierItem; menuOpen?: boolean; onDropImage: (itemId: string, files: FileList | null) => void; onGenerateTextImage: (itemId: string) => void; onLookup: (itemId: string) => void; onOpenPicker: (itemId: string) => void; onRemove: (itemId: string) => void; onToggleMenu: (itemId: string) => void; onUpload: (itemId: string) => void }) {
+function SortableCard({ item, menuOpen = false, onDropImage, onOpenPicker, onRemove, onSetTextBackground, onToggleMenu, onUpload }: { item: TierItem; menuOpen?: boolean; onDropImage: (itemId: string, files: FileList | null) => void; onOpenPicker: (itemId: string) => void; onRemove: (itemId: string) => void; onSetTextBackground: (itemId: string, color: string) => void; onToggleMenu: (itemId: string) => void; onUpload: (itemId: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
-  return <div ref={setNodeRef} style={{ opacity: isDragging ? 0.4 : 1, transform: CSS.Transform.toString(transform), transition }} {...attributes} {...listeners}><CardShell item={item} menuOpen={menuOpen} onDropImage={onDropImage} onGenerateTextImage={onGenerateTextImage} onLookup={onLookup} onOpenPicker={onOpenPicker} onRemove={onRemove} onToggleMenu={onToggleMenu} onUpload={onUpload} /></div>
+  return <div ref={setNodeRef} style={{ opacity: isDragging ? 0.4 : 1, transform: CSS.Transform.toString(transform), transition }} {...attributes} {...listeners}><CardShell item={item} menuOpen={menuOpen} onDropImage={onDropImage} onOpenPicker={onOpenPicker} onRemove={onRemove} onSetTextBackground={onSetTextBackground} onToggleMenu={onToggleMenu} onUpload={onUpload} /></div>
 }
 
-function CardShell({ item, menuOpen = false, onDropImage, onGenerateTextImage, onLookup, onOpenPicker, onRemove, onToggleMenu, onUpload, overlay = false }: CardShellProps) {
+function CardShell({ item, menuOpen = false, onDropImage, onOpenPicker, onRemove, onSetTextBackground, onToggleMenu, onUpload, overlay = false }: CardShellProps) {
   const [isFileOver, setIsFileOver] = useState(false)
   const dragDepthRef = useRef(0)
 
@@ -2074,11 +2107,12 @@ function CardShell({ item, menuOpen = false, onDropImage, onGenerateTextImage, o
         {item.imageError ? <p className="card-error">{item.imageError}</p> : null}
         {!overlay && menuOpen ? (
           <div className="card-menu" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-            <button onClick={() => onLookup?.(item.id)} type="button">{item.image ? 'Refresh image' : 'Auto-pick image'}</button>
-            <button onClick={() => onGenerateTextImage?.(item.id)} type="button">{item.image?.matchMethod === 'text-image' ? 'Regenerate text image' : 'Use text image'}</button>
-            <button onClick={() => onUpload?.(item.id)} type="button">{item.image ? 'Upload replacement' : 'Upload image'}</button>
-            <button onClick={() => onOpenPicker?.(item.id)} type="button">Choose image</button>
-            {item.image && hasSourceLink(item.image) ? <a href={item.image.sourceUrl} rel="noreferrer" target="_blank">Open source</a> : null}
+            <button onClick={() => onOpenPicker?.(item.id)} type="button">Choose AI image</button>
+            <button onClick={() => onUpload?.(item.id)} type="button">Upload image</button>
+            <label className="card-menu-color">
+              <span>Change text background</span>
+              <input aria-label={`Change text background for ${item.name}`} onChange={(event) => onSetTextBackground?.(item.id, event.target.value)} type="color" value={currentTextBackgroundColor(item)} />
+            </label>
             <button className="card-menu-danger" onClick={() => onRemove?.(item.id)} type="button">Remove item</button>
           </div>
         ) : null}
@@ -2231,6 +2265,7 @@ function sanitizeItems(value: unknown): Record<string, TierItem> {
         imageError: typeof item.imageError === 'string' ? item.imageError : '',
         imageStatus: item.imageStatus || 'idle',
         name: item.name,
+        textBackground: typeof item.textBackground === 'string' && normalizeHexColor(item.textBackground) ? normalizeHexColor(item.textBackground) ?? undefined : undefined,
         tierId: typeof item.tierId === 'string' ? item.tierId : null,
       },
     ])
@@ -2394,7 +2429,9 @@ function createTextImageDataUrl(item: TierItem): string {
     throw new Error('This browser could not generate a text image.')
   }
 
-  const palette = getTextImagePalette(item.name)
+  const palette = item.textBackground
+    ? buildTextImagePaletteFromColor(item.textBackground)
+    : getTextImagePalette(item.name)
   const label = item.name.trim() || 'Untitled'
   const background = context.createLinearGradient(0, 0, size, size)
   background.addColorStop(0, palette[0])
@@ -2575,6 +2612,28 @@ function getTextImagePalette(value: string) {
   return palettes[Math.abs(hashString(value)) % palettes.length]
 }
 
+function currentTextBackgroundColor(item: TierItem) {
+  return normalizeHexColor(item.textBackground) ?? getTextImagePalette(item.name)[1]
+}
+
+function buildTextImagePaletteFromColor(color: string) {
+  const normalized = normalizeHexColor(color)
+
+  if (!normalized) {
+    return getTextImagePalette(color)
+  }
+
+  const bright = mixHexColors(normalized, '#f5f9ff', 0.22)
+
+  return [
+    mixHexColors(normalized, '#08111f', 0.82),
+    mixHexColors(normalized, '#11325f', 0.2),
+    mixHexColors(normalized, '#04070f', 0.92),
+    bright,
+    colorToRgba(bright, 0.72),
+  ] as const
+}
+
 function hashString(value: string) {
   let hash = 0
 
@@ -2591,6 +2650,26 @@ function colorToRgba(hex: string, alpha: number) {
   const green = Number.parseInt(normalized.slice(2, 4), 16)
   const blue = Number.parseInt(normalized.slice(4, 6), 16)
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`
+}
+
+function normalizeHexColor(value: string | null | undefined) {
+  if (!value) {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return /^#([0-9a-f]{6})$/i.test(trimmed) ? trimmed.toLowerCase() : null
+}
+
+function mixHexColors(from: string, to: string, amount: number) {
+  const start = hexToRgb(from)
+  const end = hexToRgb(to)
+
+  return rgbToHex({
+    red: lerp(start.red, end.red, amount),
+    green: lerp(start.green, end.green, amount),
+    blue: lerp(start.blue, end.blue, amount),
+  })
 }
 
 async function resizeImageFile(file: File): Promise<string> {
@@ -2705,7 +2784,6 @@ function moveItemToContainer(board: BoardState, itemId: string, fromContainer: s
 }
 function initialsFor(value: string) { return value.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') }
 function slugify(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') }
-function hasSourceLink(image: ImageResult) { return Boolean(image.sourceUrl) && !image.sourceUrl.startsWith('data:') }
 function itemKeyFor(name: string, context: string) { return `${name.trim().toLowerCase()}|${context.trim().toLowerCase()}` }
 function formatCountLabel(count: number, labels: CountLabel) { return count === 1 ? labels.singular : labels.plural }
 function dedupeSuggestionItems(items: Array<{ context: string; name: string }>) {
