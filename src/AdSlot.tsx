@@ -14,7 +14,7 @@ declare global {
   }
 }
 
-const ADSENSE_CLIENT = (import.meta.env.VITE_ADSENSE_CLIENT || '').trim()
+const ADSENSE_CLIENT = (import.meta.env.VITE_ADSENSE_CLIENT || 'ca-pub-2342012224555022').trim()
 const ADSENSE_SCRIPT_ID = 'forge-tierlist-adsense-script'
 
 export function AdSlot({ className = '', format = 'auto', label = 'Ad', minHeight = 0, slot }: AdSlotProps) {
@@ -95,6 +95,14 @@ export function AdSlot({ className = '', format = 'auto', label = 'Ad', minHeigh
 }
 
 function ensureAdSenseScript() {
+  const externalScript = document.querySelector<HTMLScriptElement>(
+    'script[src*="pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"]',
+  )
+
+  if (externalScript) {
+    return Promise.resolve()
+  }
+
   const existingScript = document.getElementById(ADSENSE_SCRIPT_ID) as HTMLScriptElement | null
 
   if (existingScript) {
