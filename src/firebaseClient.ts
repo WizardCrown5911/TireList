@@ -15,6 +15,7 @@ import {
   getDoc,
   getDocs,
   getFirestore,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -28,6 +29,10 @@ export type AuthUser = {
   email: string
   photoURL: string
   uid: string
+}
+
+export type UserEntitlements = {
+  adFree: boolean
 }
 
 export type CloudTierListSummary = {
@@ -86,6 +91,30 @@ export function subscribeToAuth(callback: (user: AuthUser | null) => void) {
   return onAuthStateChanged(firebaseAuth, (user) => {
     callback(user ? toAuthUser(user) : null)
   })
+}
+
+export function subscribeToUserEntitlements(
+  userId: string,
+  callback: (entitlements: UserEntitlements) => void,
+  onError?: (error: Error) => void,
+) {
+  if (!firebaseConfigured) {
+    callback(defaultUserEntitlements())
+    return () => {}
+  }
+
+  const { db: firestore } = getFirebaseServices()
+
+  return onSnapshot(
+    doc(firestore, 'userEntitlements', userId),
+    (snapshot) => {
+      callback(toUserEntitlements(snapshot.exists() ? snapshot.data() : undefined))
+    },
+    (error) => {
+      callback(defaultUserEntitlements())
+      onError?.(error instanceof Error ? error : new Error('Unable to load user entitlements.'))
+    },
+  )
 }
 
 export async function signInWithGoogle() {
@@ -211,6 +240,16 @@ function toCloudTierListSummary(id: string, data: Record<string, unknown>): Clou
     title: typeof data.title === 'string' ? data.title : 'Untitled tier list',
     updatedAtMillis: getMillis(data.updatedAtMillis ?? data.updatedAt),
   }
+}
+
+function toUserEntitlements(data?: Record<string, unknown>): UserEntitlements {
+  return {
+    adFree: Boolean(data?.adFree),
+  }
+}
+
+function defaultUserEntitlements(): UserEntitlements {
+  return { adFree: false }
 }
 
 function getMillis(value: unknown) {

@@ -98,6 +98,33 @@
   margin-top: 4px;
 }
 
+.access-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid rgba(93, 119, 186, 0.26);
+  border-radius: 999px;
+  background: rgba(6, 12, 25, 0.78);
+  color: #b9c9ed;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.access-pill-active {
+  border-color: rgba(112, 255, 187, 0.4);
+  background: rgba(8, 34, 24, 0.82);
+  color: #9ef5c8;
+  box-shadow: 0 0 24px rgba(44, 214, 140, 0.12);
+}
+
+.access-pill-pending {
+  border-color: rgba(110, 164, 255, 0.34);
+  color: #c9dbff;
+}
+
 .ad-shell {
   display: flex;
   flex-direction: column;

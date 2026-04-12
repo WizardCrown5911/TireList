@@ -42,9 +42,11 @@ import {
   signInWithGoogle,
   signOutOfGoogle,
   subscribeToAuth,
+  subscribeToUserEntitlements,
   type AuthUser,
   type CloudTierListSnapshot,
   type CloudTierListSummary,
+  type UserEntitlements,
 } from './firebaseClient'
 import { AdSlot } from './AdSlot'
 import './App.css'
@@ -100,9 +102,11 @@ type CardShellProps = {
   overlay?: boolean
 }
 type DashboardViewProps = {
+  adFreeAccess: boolean
   authLoading: boolean
   cloudSaving: boolean
   currentListId: string | null
+  entitlementsLoading: boolean
   error: string
   firebaseConfigured: boolean
   lists: CloudTierListSummary[]
@@ -163,6 +167,7 @@ const DEFAULT_PROVIDER_SELECTION: ProviderSelection = {
   rankers: ['gemini'],
   sources: ['openverse'],
 }
+const DEFAULT_USER_ENTITLEMENTS: UserEntitlements = { adFree: false }
 const ADSENSE_TOP_SLOT = (import.meta.env.VITE_ADSENSE_TOP_SLOT || '').trim()
 const ADSENSE_SIDEBAR_SLOT = (import.meta.env.VITE_ADSENSE_SIDEBAR_SLOT || '').trim()
 const ADSENSE_DASHBOARD_SLOT = (import.meta.env.VITE_ADSENSE_DASHBOARD_SLOT || '').trim()
@@ -202,6 +207,8 @@ function App() {
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [authLoading, setAuthLoading] = useState(firebaseConfigured)
+  const [userEntitlements, setUserEntitlements] = useState<UserEntitlements>(DEFAULT_USER_ENTITLEMENTS)
+  const [entitlementsLoading, setEntitlementsLoading] = useState(false)
   const [dashboardLists, setDashboardLists] = useState<CloudTierListSummary[]>([])
   const [dashboardLoading, setDashboardLoading] = useState(false)
   const [dashboardError, setDashboardError] = useState('')
@@ -236,15 +243,35 @@ function App() {
   useEffect(() => {
     if (!firebaseConfigured) {
       setAuthLoading(false)
+      setEntitlementsLoading(false)
+      setUserEntitlements(DEFAULT_USER_ENTITLEMENTS)
       return
     }
 
-    return subscribeToAuth((user) => {
+    let unsubscribeEntitlements: (() => void) | null = null
+
+    const unsubscribeAuth = subscribeToAuth((user) => {
+      unsubscribeEntitlements?.()
+      unsubscribeEntitlements = null
+
       setAuthUser(user)
       setAuthLoading(false)
       setDashboardError('')
 
       if (user) {
+        setUserEntitlements(DEFAULT_USER_ENTITLEMENTS)
+        setEntitlementsLoading(true)
+        unsubscribeEntitlements = subscribeToUserEntitlements(
+          user.uid,
+          (entitlements) => {
+            setUserEntitlements(entitlements)
+            setEntitlementsLoading(false)
+          },
+          (error) => {
+            console.warn('Unable to load ad-free access for this user.', error)
+            setEntitlementsLoading(false)
+          },
+        )
         setDashboardLoading(true)
         void listUserTierLists(user.uid)
           .then(setDashboardLists)
@@ -255,8 +282,15 @@ function App() {
       } else {
         setDashboardLists([])
         setCurrentCloudListId(null)
+        setUserEntitlements(DEFAULT_USER_ENTITLEMENTS)
+        setEntitlementsLoading(false)
       }
     })
+
+    return () => {
+      unsubscribeEntitlements?.()
+      unsubscribeAuth()
+    }
   }, [firebaseConfigured])
   useEffect(() => {
     try {
@@ -361,6 +395,9 @@ function App() {
   const addableSuggestionCount = titleSuggestions.filter((item) => !existingItemKeys.has(itemKeyFor(item.name, item.context))).length
   const selectedAddableSuggestionCount = titleSuggestions.filter((item) => selectedSuggestionIds.includes(item.id) && !existingItemKeys.has(itemKeyFor(item.name, item.context))).length
   const sortedDashboardLists = sortDashboardLists(dashboardLists, dashboardSort)
+  const showAds = !firebaseConfigured
+    ? true
+    : !authLoading && (!authUser || (!entitlementsLoading && !userEntitlements.adFree))
 
   function updateBoard(updater: (current: BoardState) => BoardState) {
     setBoard((current) => {
@@ -1524,6 +1561,11 @@ function App() {
             <button className={`ghost-button ${appView === 'builder' ? 'ghost-button-active' : ''}`} onClick={() => setAppView('builder')} type="button">Builder</button>
             <button className={`ghost-button ${appView === 'dashboard' ? 'ghost-button-active' : ''}`} onClick={() => { setAppView('dashboard'); if (authUser) void refreshDashboardLists(authUser) }} type="button">Dashboard</button>
             {authUser ? <button className="ghost-button" onClick={() => void handleGoogleSignOut()} type="button">Sign out</button> : <button className="accent-button" disabled={authLoading} onClick={() => void handleGoogleSignIn()} type="button">{authLoading ? 'Checking sign-in...' : 'Sign in with Google'}</button>}
+            {authUser ? (
+              <span className={`access-pill ${entitlementsLoading ? 'access-pill-pending' : userEntitlements.adFree ? 'access-pill-active' : ''}`}>
+                {entitlementsLoading ? 'Checking access...' : userEntitlements.adFree ? 'Ad-free access' : 'Ads enabled'}
+              </span>
+            ) : null}
           </div>
         </div>
         <div className="hero-stats">
@@ -1532,9 +1574,9 @@ function App() {
           <Stat label="Mode" value={lookupMode} />
         </div>
       </header>
-      {ADSENSE_TOP_SLOT ? <AdSlot className="ad-shell-banner" label="Sponsored" minHeight={96} slot={ADSENSE_TOP_SLOT} /> : null}
+      {showAds && ADSENSE_TOP_SLOT ? <AdSlot className="ad-shell-banner" label="Sponsored" minHeight={96} slot={ADSENSE_TOP_SLOT} /> : null}
       {appView === 'dashboard' ? (
-        <DashboardView authLoading={authLoading} cloudSaving={cloudSaving} currentListId={currentCloudListId} error={dashboardError} firebaseConfigured={firebaseConfigured} lists={sortedDashboardLists} loading={dashboardLoading} onBackToBuilder={() => setAppView('builder')} onDelete={(listId) => { void deleteDashboardList(listId) }} onFavorite={(listId, favorite) => { void toggleDashboardFavorite(listId, favorite) }} onOpen={(listId) => { void openDashboardList(listId) }} onRefresh={() => { void refreshDashboardLists() }} onSaveCurrent={() => { void saveCurrentListToDashboard() }} onSignIn={() => { void handleGoogleSignIn() }} onSignOut={() => { void handleGoogleSignOut() }} onSortChange={setDashboardSort} sort={dashboardSort} user={authUser} />
+        <DashboardView adFreeAccess={userEntitlements.adFree} authLoading={authLoading} cloudSaving={cloudSaving} currentListId={currentCloudListId} entitlementsLoading={entitlementsLoading} error={dashboardError} firebaseConfigured={firebaseConfigured} lists={sortedDashboardLists} loading={dashboardLoading} onBackToBuilder={() => setAppView('builder')} onDelete={(listId) => { void deleteDashboardList(listId) }} onFavorite={(listId, favorite) => { void toggleDashboardFavorite(listId, favorite) }} onOpen={(listId) => { void openDashboardList(listId) }} onRefresh={() => { void refreshDashboardLists() }} onSaveCurrent={() => { void saveCurrentListToDashboard() }} onSignIn={() => { void handleGoogleSignIn() }} onSignOut={() => { void handleGoogleSignOut() }} onSortChange={setDashboardSort} sort={dashboardSort} user={authUser} />
       ) : (
       <main className={`workspace ${sidebarCollapsed ? 'workspace-sidebar-collapsed' : ''}`}>
         <input accept=".json,application/json" className="visually-hidden" onChange={(event) => { void importListFile(event.currentTarget.files?.[0] || null); event.currentTarget.value = '' }} ref={importFileRef} type="file" />
@@ -1611,7 +1653,7 @@ function App() {
                 </Panel>
                 <div className={`notice notice-${notice.tone}`}><strong>{backendReady === false ? 'Backend offline.' : 'Status.'}</strong><span>{notice.message}</span></div>
                 <div className="meta-card"><p>Current image APIs: {selectionSummary(providerSelection)}.</p><p>Choose sources and AI rerankers from the `Image APIs` dropdown. With no AI rankers selected, the app falls back to metadata-only matching.</p></div>
-                {ADSENSE_SIDEBAR_SLOT ? <AdSlot className="ad-shell-rail" format="rectangle" label="Sponsored" minHeight={260} slot={ADSENSE_SIDEBAR_SLOT} /> : null}
+                {showAds && ADSENSE_SIDEBAR_SLOT ? <AdSlot className="ad-shell-rail" format="rectangle" label="Sponsored" minHeight={260} slot={ADSENSE_SIDEBAR_SLOT} /> : null}
               </div>
             </div>
           )}
@@ -1730,7 +1772,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return <div className="stat-card"><span>{label}</span><strong>{value}</strong></div>
 }
 
-function DashboardView({ authLoading, cloudSaving, currentListId, error, firebaseConfigured, lists, loading, onBackToBuilder, onDelete, onFavorite, onOpen, onRefresh, onSaveCurrent, onSignIn, onSignOut, onSortChange, sort, user }: DashboardViewProps) {
+function DashboardView({ adFreeAccess, authLoading, cloudSaving, currentListId, entitlementsLoading, error, firebaseConfigured, lists, loading, onBackToBuilder, onDelete, onFavorite, onOpen, onRefresh, onSaveCurrent, onSignIn, onSignOut, onSortChange, sort, user }: DashboardViewProps) {
   if (!firebaseConfigured) {
     return (
       <main className="dashboard-page">
@@ -1783,6 +1825,9 @@ function DashboardView({ authLoading, cloudSaving, currentListId, error, firebas
           <div className="dashboard-account">
             {user.photoURL ? <img alt="" src={user.photoURL} /> : null}
             <span>{user.email}</span>
+            <span className={`access-pill ${entitlementsLoading ? 'access-pill-pending' : adFreeAccess ? 'access-pill-active' : ''}`}>
+              {entitlementsLoading ? 'Checking access...' : adFreeAccess ? 'Ad-free access' : 'Ads enabled'}
+            </span>
             <button className="ghost-button" onClick={onSignOut} type="button">Sign out</button>
           </div>
         </div>
@@ -1801,7 +1846,7 @@ function DashboardView({ authLoading, cloudSaving, currentListId, error, firebas
             </select>
           </label>
         </div>
-        {ADSENSE_DASHBOARD_SLOT ? <AdSlot className="ad-shell-dashboard" label="Sponsored" minHeight={110} slot={ADSENSE_DASHBOARD_SLOT} /> : null}
+        {!entitlementsLoading && !adFreeAccess && ADSENSE_DASHBOARD_SLOT ? <AdSlot className="ad-shell-dashboard" label="Sponsored" minHeight={110} slot={ADSENSE_DASHBOARD_SLOT} /> : null}
         {error ? <p className="dashboard-error">{error}</p> : null}
         {lists.length ? (
           <div className="dashboard-grid">

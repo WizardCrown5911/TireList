@@ -100,6 +100,11 @@ Use Firestore rules like this so users can only read and write their own tier li
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    match /userEntitlements/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
+    }
+
     match /users/{userId}/tierLists/{listId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
@@ -108,6 +113,17 @@ service cloud.firestore {
 ```
 
 Cloud saves store the tier list snapshot in Firestore. Generated text images are compacted and rebuilt when a list opens; very large custom uploaded images may still make a list too large for Firestore, so export JSON for upload-heavy lists.
+
+### Ad-free users
+
+You can mark specific signed-in users as ad-free with a Firestore document:
+
+1. Open Firestore in Firebase Console.
+2. Create a document in the `userEntitlements` collection.
+3. Use the user's Firebase Auth UID as the document ID.
+4. Add a boolean field named `adFree` and set it to `true`.
+
+After that user signs in, the app hides the top banner, sidebar ad, and dashboard ad for that account.
 
 ## AdSense setup
 
