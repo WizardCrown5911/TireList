@@ -172,6 +172,14 @@ app.post('/api/images/lookup', async (request, response) => {
 
 app.use(express.static(distPath))
 
+app.get('/guide', (_request, response) => {
+  response.sendFile(path.join(distPath, 'guide.html'))
+})
+
+app.get('/about', (_request, response) => {
+  response.sendFile(path.join(distPath, 'about.html'))
+})
+
 app.use((request, response, next) => {
   if (request.path.startsWith('/api/')) {
     next()
